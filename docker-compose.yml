@@ -10,8 +10,10 @@ services:
       - ./uploads:/var/www/html/uploads
       - ./logs:/var/www/html/logs
     depends_on:
-      - db
-      - mailhog
+      db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
     environment:
       - DB_HOST=db
       - DB_NAME=upload_system
@@ -33,6 +35,11 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost", "-u", "root", "-p'root_password'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - upload-network
 

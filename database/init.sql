@@ -51,8 +51,8 @@ CREATE TABLE email_logs (
 );
 
 -- Inserir usuário administrador padrão
-INSERT INTO users (username, email, password_hash, role) VALUES ('victor', 'victor@pixfilmes.com', '$2y$10$tba/Q.sIghmlySD3a/5VDeM4v1rLp6dJ3oyeNsY7f8F/gAMs2iC1C', 'admin')
-ON DUPLICATE KEY UPDATE email = 'victor@pixfilmes.com', password_hash = '$2y$10$tba/Q.sIghmlySD3a/5VDeM4v1rLp6dJ3oyeNsY7f8F/gAMs2iC1C', role = 'admin';
+INSERT INTO users (username, email, password_hash, role) VALUES ('admin', 'admin@transfer.com', '$2y$10$If6LIue4eXvrr23a/T9qFeTz9iAPlI72mJ.y5a1UQdxyQEh5Pz5a.', 'admin')
+ON DUPLICATE KEY UPDATE email = 'admin@transfer.com', password_hash = '$2y$10$If6LIue4eXvrr23a/T9qFeTz9iAPlI72mJ.y5a1UQdxyQEh5Pz5a.', role = 'admin';
 
 -- Inserir usuário de demonstração
 INSERT INTO users (username, email, password_hash, role) VALUES ('demo', 'demo@transfer.com', '$2y$10$DgeI4V6q..QYw1vJ3O/2P.f6h./W8I5u2V5o.Yy9j.x3F.w4g.8y.', 'user')

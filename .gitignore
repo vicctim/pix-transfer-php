@@ -40,4 +40,9 @@ env.example
 
 # Arquivos de cache
 cache/
-tmp/ 
+tmp/
+
+# Arquivos de configuração local
+/src/env.php
+.env
+.env.local 
