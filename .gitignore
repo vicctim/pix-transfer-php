@@ -1,0 +1,43 @@
+# Logs
+logs/
+*.log
+
+# Uploads (serão volumes)
+uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node modules (se houver)
+node_modules/
+
+# Composer
+vendor/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Docker
+.dockerignore
+
+# Environment files
+.env
+env.example
+
+# Arquivos de configuração sensíveis
+.env.local
+.env.production
+
+# Arquivos de backup
+*.bak
+*.backup
+
+# Arquivos de cache
+cache/
+tmp/ 

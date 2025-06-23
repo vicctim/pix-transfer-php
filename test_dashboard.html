@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de Upload</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .upload-area { border: 2px dashed #ccc; padding: 20px; margin: 20px 0; }
+        .btn { background: #007cba; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+        .result { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Teste de Upload</h1>
+    
+    <div class="upload-area">
+        <h3>Selecione arquivos para upload:</h3>
+        <input type="file" id="fileInput" multiple>
+        <button class="btn" onclick="testUpload()">Testar Upload</button>
+    </div>
+    
+    <div id="result" class="result" style="display: none;"></div>
+
+    <script>
+        async function testUpload() {
+            const fileInput = document.getElementById('fileInput');
+            const resultDiv = document.getElementById('result');
+            
+            if (fileInput.files.length === 0) {
+                alert('Selecione pelo menos um arquivo');
+                return;
+            }
+            
+            const formData = new FormData();
+            for (let file of fileInput.files) {
+                formData.append('files[]', file);
+            }
+            formData.append('title', 'Teste');
+            formData.append('description', 'Teste de upload');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '🔄 Enviando...';
+            
+            try {
+                console.log('Iniciando upload...');
+                const response = await fetch('upload_handler.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                const contentType = response.headers.get('content-type');
+                console.log('Content-Type:', contentType);
+                
+                if (!contentType || !contentType.includes('application/json')) {
+                    const textResponse = await response.text();
+                    console.error('Resposta não é JSON:', textResponse);
+                    resultDiv.innerHTML = '❌ Erro: Resposta não é JSON válido<br><pre>' + textResponse + '</pre>';
+                    return;
+                }
+                
+                const result = await response.json();
+                console.log('Resultado:', result);
+                
+                if (result.success) {
+                    resultDiv.innerHTML = '✅ Upload concluído com sucesso!<br>Token: ' + result.data.session_token;
+                } else {
+                    resultDiv.innerHTML = '❌ Erro: ' + result.message;
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                resultDiv.innerHTML = '❌ Erro: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html> 

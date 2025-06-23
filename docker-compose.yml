@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "3131:80"
+    volumes:
+      - ./src:/var/www/html
+      - ./uploads:/var/www/html/uploads
+      - ./logs:/var/www/html/logs
+    depends_on:
+      - db
+      - mailhog
+    environment:
+      - DB_HOST=db
+      - DB_NAME=upload_system
+      - DB_USER=upload_user
+      - DB_PASS=upload_password
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+      - ADMIN_EMAIL=victor@pixfilmes.com
+    networks:
+      - upload-network
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: upload_system
+      MYSQL_USER: upload_user
+      MYSQL_PASSWORD: upload_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - upload-network
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - upload-network
+
+volumes:
+  mysql_data:
+
+networks:
+  upload-network:
+    driver: bridge 
