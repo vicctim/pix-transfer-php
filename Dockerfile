@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     imagemagick \
     git \
     curl \
+    sendmail \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar extensões PHP
@@ -41,6 +42,14 @@ RUN echo "upload_max_filesize = 10G" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "max_execution_time = 3600" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "max_input_time = 3600" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "memory_limit = 2G" >> /usr/local/etc/php/conf.d/uploads.ini
+
+# Instalar mhsendmail para integração com MailHog
+RUN curl -sSLO https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64 \
+    && chmod +x mhsendmail_linux_amd64 \
+    && mv mhsendmail_linux_amd64 /usr/local/bin/mhsendmail
+
+# Configurar sendmail para usar MailHog
+RUN echo "sendmail_path = /usr/local/bin/mhsendmail --smtp-addr=mailhog:1025" >> /usr/local/etc/php/conf.d/sendmail.ini
 
 # Criar diretórios necessários
 RUN mkdir -p /var/www/html/uploads \

@@ -22,7 +22,7 @@ try {
     require_once 'models/UploadSession.php';
     require_once 'models/File.php';
     require_once 'models/User.php';
-    require_once 'config/email.php';
+    require_once 'config/email_phpmailer.php';
 } catch (Exception $e) {
     ob_end_clean();
     http_response_code(500);
@@ -142,13 +142,19 @@ try {
 
     // Enviar emails
     try {
-        $emailService = new EmailService();
+        error_log("=== INICIANDO ENVIO DE EMAILS ===");
+        $emailService = new PHPMailerEmailService();
         $user = new User();
         $userData = $user->getById($_SESSION['user_id']);
         
+        error_log("User data retrieved: " . json_encode($userData));
+        error_log("Transfer mode: " . $transfer_mode);
+        error_log("Recipient email: " . $recipient_email);
+        
         // Se o modo for email, envia para o destinatário
         if ($transfer_mode === 'email' && $recipient_email) {
-            $emailService->sendDownloadLinkToRecipient(
+            error_log("Sending email to recipient: " . $recipient_email);
+            $recipientResult = $emailService->sendDownloadLinkToRecipient(
                 $recipient_email,
                 $userData['email'], // Email do remetente
                 $title,
@@ -157,10 +163,12 @@ try {
                 count($uploaded_files),
                 $total_size
             );
+            error_log("Recipient email result: " . ($recipientResult ? 'SUCCESS' : 'FAILED'));
         }
 
         // Email de confirmação para o próprio usuário e notificação para o Admin
-        $emailService->sendUploadCompleteEmail(
+        error_log("Sending upload complete email to: " . $userData['email']);
+        $uploadResult = $emailService->sendUploadCompleteEmail(
             $userData['email'],
             $title,
             $session_token,
@@ -168,10 +176,13 @@ try {
             count($uploaded_files),
             $total_size
         );
+        error_log("Upload complete email result: " . ($uploadResult ? 'SUCCESS' : 'FAILED'));
+        error_log("=== FIM DO ENVIO DE EMAILS ===");
 
     } catch (Exception $emailError) {
         // Log do erro de email mas não falhar o upload
         error_log("Email error: " . $emailError->getMessage());
+        error_log("Email error trace: " . $emailError->getTraceAsString());
     }
 
     // Limpar qualquer output anterior

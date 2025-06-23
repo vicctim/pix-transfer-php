@@ -1,0 +1,119 @@
+version: "3.7"
+
+services:
+
+## --------------------------- PIX TRANSFER --------------------------- ##
+
+  pix-transfer:
+    image: vicctim/pix-transfer-php:latest
+    container_name: pix-transfer
+    
+    ports:
+      - "3131:80"  # Expondo porta 3131 para desenvolvimento local
+    
+    environment:
+      - DB_HOST=pix-transfer-db
+      - DB_NAME=upload_system
+      - DB_USER=upload_user
+      - DB_PASS=upload_password
+      - SMTP_HOST=pix-transfer-mailhog
+      - SMTP_PORT=1025
+      - SMTP_USER=
+      - SMTP_PASS=
+      - SMTP_FROM=noreply@pixfilmes.com
+      - SMTP_FROM_NAME=Pix Transfer
+    
+    volumes:
+      - pix-transfer-uploads:/var/www/html/uploads
+      - pix-transfer-logs:/var/www/html/logs
+    
+    networks:
+      - minha-rede
+    
+    depends_on:
+      - pix-transfer-db
+      - pix-transfer-mailhog
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
+
+## --------------------------- DATABASE --------------------------- ##
+
+  pix-transfer-db:
+    image: mysql:8.0
+    container_name: pix-transfer-db
+    
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=upload_system
+      - MYSQL_USER=upload_user
+      - MYSQL_PASSWORD=upload_password
+    
+    volumes:
+      - pix-transfer-db-data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    
+    networks:
+      - minha-rede
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+
+## --------------------------- MAILHOG --------------------------- ##
+
+  pix-transfer-mailhog:
+    image: mailhog/mailhog:latest
+    container_name: pix-transfer-mailhog
+    
+    ports:
+      - "8025:8025"  # Expondo porta 8025 para desenvolvimento local
+    
+    networks:
+      - minha-rede
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+## --------------------------- VOLUMES --------------------------- ##
+
+volumes:
+  pix-transfer-uploads:
+    external: true
+    name: pix-transfer-uploads
+  pix-transfer-logs:
+    external: true
+    name: pix-transfer-logs
+  pix-transfer-db-data:
+    external: true
+    name: pix-transfer-db-data
+
+## --------------------------- NETWORKS --------------------------- ##
+
+networks:
+  minha-rede:
+    external: true
+    name: minha-rede 

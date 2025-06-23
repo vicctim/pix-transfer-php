@@ -1,5 +1,20 @@
 RewriteEngine On
 
+# URLs curtas especiais (devem vir PRIMEIRO)
+RewriteRule ^s/([a-zA-Z0-9]+)/?$ s.php?c=$1 [NC,L,QSA]
+RewriteRule ^download/([a-zA-Z0-9_-]+)/?$ download.php?token=$1 [NC,L,QSA]
+
+# Redirecionar URLs com .php para versão sem .php (exceto handlers)
+RewriteCond %{THE_REQUEST} \s/+(.*)\.php[\s?] [NC]
+RewriteCond %{REQUEST_URI} !^.*(upload_handler|send_email|update_expiration)\.php [NC]
+RewriteRule ^ /%1? [R=301,L]
+
+# URLs amigáveis - remover .php das URLs (exceto handlers)
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_URI} !^.*(upload_handler|send_email|update_expiration)\.php [NC]
+RewriteRule ^([^.]+)$ $1.php [NC,L]
+
 # Permitir uploads grandes
 php_value upload_max_filesize 10G
 php_value post_max_size 10G

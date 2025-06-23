@@ -58,12 +58,38 @@ class UploadSession {
                 $this->recipient_email = $session['recipient_email'];
                 $this->created_at = $session['created_at'];
                 $this->expires_at = $session['expires_at'];
-                return true;
+                return $session;
             }
             
             return false;
         } catch (Exception $e) {
             error_log("Erro ao buscar sessão: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    public function getById($id) {
+        try {
+            $stmt = $this->db->query(
+                "SELECT * FROM upload_sessions WHERE id = ?",
+                [$id]
+            );
+            
+            $session = $stmt->fetch();
+            if ($session) {
+                $this->id = $session['id'];
+                $this->user_id = $session['user_id'];
+                $this->token = $session['token'];
+                $this->title = $session['title'];
+                $this->recipient_email = $session['recipient_email'];
+                $this->created_at = $session['created_at'];
+                $this->expires_at = $session['expires_at'];
+                return true;
+            }
+            
+            return false;
+        } catch (Exception $e) {
+            error_log("Erro ao buscar sessão por ID: " . $e->getMessage());
             return false;
         }
     }
@@ -88,6 +114,19 @@ class UploadSession {
             return $stmt->rowCount() > 0;
         } catch (Exception $e) {
             error_log("Erro ao deletar sessão: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    public function updateExpiration($id, $expires_at) {
+        try {
+            $stmt = $this->db->query(
+                "UPDATE upload_sessions SET expires_at = ? WHERE id = ?", 
+                [$expires_at, $id]
+            );
+            return $stmt->rowCount() > 0;
+        } catch (Exception $e) {
+            error_log("Erro ao atualizar expiração: " . $e->getMessage());
             return false;
         }
     }

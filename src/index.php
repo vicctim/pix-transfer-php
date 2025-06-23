@@ -159,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
     <div class="header">
-        <img src="src/img/logo.png" alt="Logo" style="width: 120px; height: 120px; margin-bottom: 20px;">
+        <img src="src/img/logo.png" alt="Logo" style="height: 70px; width: auto; margin: 0 0 20px; display: block;">
         <h1>Compartilhamento de arquivos <span>Pix Filmes</span></h1>
         <p>Faça login para começar a enviar arquivos</p>
     </div>

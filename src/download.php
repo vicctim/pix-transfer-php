@@ -5,7 +5,7 @@ session_start(); // Inicia a sessão para controle de senha
 require_once 'models/UploadSession.php';
 require_once 'models/File.php';
 require_once 'models/User.php';
-require_once 'config/email.php'; // Adicionar include para o serviço de email
+require_once 'config/email_phpmailer.php'; // Adicionar include para o serviço de email
 
 $token = $_GET['token'] ?? '';
 $action = $_GET['action'] ?? 'view';
@@ -18,6 +18,8 @@ if (empty($token)) {
 
 $uploadSession = new UploadSession();
 $session_data = $uploadSession->getByToken($token);
+$password_required = false; // Inicializar variável
+$is_authorized = true; // Inicializar variável
 
 if (!$session_data) {
     http_response_code(404);
@@ -29,19 +31,26 @@ $files = $fileModel->getBySessionId($session_data['id']);
 $user = new User();
 $userData = $user->getById($session_data['user_id']);
 
-// Lógica de notificação por email de download
-if (!isset($_SESSION['download_notified']) || !in_array($token, $_SESSION['download_notified'])) {
-    try {
-        $emailService = new EmailService();
-        $emailService->sendDownloadNotificationEmail(
-            $_SERVER['REMOTE_ADDR'],
-            $userData['email'],
-            $token,
-            $session_data['title']
-        );
-        $_SESSION['download_notified'][] = $token; // Marca como notificado
-    } catch (Exception $e) {
-        error_log('Falha ao enviar e-mail de notificação de download: ' . $e->getMessage());
+// Função para enviar notificação de download
+function sendDownloadNotification($token, $userData, $session_data) {
+    if (!isset($_SESSION['download_notified'])) {
+        $_SESSION['download_notified'] = [];
+    }
+    
+    if (!in_array($token, $_SESSION['download_notified'])) {
+        try {
+            $emailService = new PHPMailerEmailService();
+            $emailService->sendDownloadNotificationEmail(
+                $_SERVER['REMOTE_ADDR'],
+                $userData['email'],
+                $token,
+                $session_data['title']
+            );
+            $_SESSION['download_notified'][] = $token; // Marca como notificado
+            error_log("Notificação de download enviada para: " . $userData['email']);
+        } catch (Exception $e) {
+            error_log('Falha ao enviar e-mail de notificação de download: ' . $e->getMessage());
+        }
     }
 }
 
@@ -49,6 +58,9 @@ if (!isset($_SESSION['download_notified']) || !in_array($token, $_SESSION['downl
 if ($action === 'download' && $file_id) {
     $file = $fileModel->getById($file_id);
     if ($file && $file['session_id'] == $session_data['id'] && file_exists($file['file_path'])) {
+        // Enviar notificação de download
+        sendDownloadNotification($token, $userData, $session_data);
+        
         ob_end_clean(); // Limpa o buffer antes de enviar os headers
         header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . htmlspecialchars($file['original_name']) . '"');
@@ -66,6 +78,9 @@ if ($action === 'download_zip') {
     if (empty($files)) {
         die('Nenhum arquivo encontrado');
     }
+    
+    // Enviar notificação de download
+    sendDownloadNotification($token, $userData, $session_data);
     
     $zip_name = 'upload_' . $token . '.zip';
     $zip_path = sys_get_temp_dir() . '/' . $zip_name;
@@ -372,7 +387,7 @@ if ($password_required && !$is_authorized) {
 <body>
     <div class="container">
         <div class="header">
-            <img src="src/img/logo.png" alt="Logo" style="height: 50px; width: auto; margin-bottom: 15px;">
+            <img src="src/img/logo.png" alt="Logo" style="height: 70px; width: auto; margin: 0 0 15px 0; display: block;">
             <h1>Download de Arquivos</h1>
             <p>Arquivos compartilhados por <?php echo htmlspecialchars($userData['username']); ?></p>
         </div>
@@ -389,7 +404,7 @@ if ($password_required && !$is_authorized) {
                     <h3 style="margin-bottom: 15px; color: #333;"><?php echo htmlspecialchars($session_data['title']); ?></h3>
                 <?php endif; ?>
                 
-                <?php if ($session_data['description']): ?>
+                <?php if (isset($session_data['description']) && $session_data['description']): ?>
                     <p style="margin-bottom: 20px; color: #666;"><?php echo htmlspecialchars($session_data['description']); ?></p>
                 <?php endif; ?>
 

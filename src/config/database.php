@@ -17,6 +17,9 @@ class Database {
                     PDO::ATTR_EMULATE_PREPARES => false
                 ]
             );
+            
+            // Configurar timezone do MySQL
+            $this->connection->exec("SET time_zone = '-03:00'");
         } catch (PDOException $e) {
             error_log("Erro de conexão com banco de dados: " . $e->getMessage());
             throw new Exception("Erro de conexão com banco de dados");

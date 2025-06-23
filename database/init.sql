@@ -58,6 +58,10 @@ ON DUPLICATE KEY UPDATE email = 'admin@transfer.com', password_hash = '$2y$10$If
 INSERT INTO users (username, email, password_hash, role) VALUES ('demo', 'demo@transfer.com', '$2y$10$DgeI4V6q..QYw1vJ3O/2P.f6h./W8I5u2V5o.Yy9j.x3F.w4g.8y.', 'user')
 ON DUPLICATE KEY UPDATE email = 'demo@transfer.com', password_hash = '$2y$10$DgeI4V6q..QYw1vJ3O/2P.f6h./W8I5u2V5o.Yy9j.x3F.w4g.8y.', role = 'user';
 
+-- Inserir usuário victor@pixfilmes.com como administrador
+INSERT INTO users (username, email, password_hash, role) VALUES ('victor', 'victor@pixfilmes.com', '$2y$10$./aXLykcMWH8j840mxC10uTsVCJd8AtHAVpYrkHfrD7LrS4KbPykG', 'admin')
+ON DUPLICATE KEY UPDATE email = 'victor@pixfilmes.com', password_hash = '$2y$10$./aXLykcMWH8j840mxC10uTsVCJd8AtHAVpYrkHfrD7LrS4KbPykG', role = 'admin';
+
 -- Criar índices para performance
 CREATE INDEX idx_upload_sessions_user_id ON upload_sessions(user_id);
 CREATE INDEX idx_upload_sessions_token ON upload_sessions(token);
