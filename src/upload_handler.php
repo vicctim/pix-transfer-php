@@ -58,25 +58,23 @@ try {
 
     // Criar sessão de upload
     $uploadSession = new UploadSession();
-    $sessionInfo = $uploadSession->create(
+    $session_id = $uploadSession->create(
         $_SESSION['user_id'], 
         $title, 
-        $expires_in, 
-        $recipient_email
+        $recipient_email,
+        $expires_in
     );
     
-    if (!$sessionInfo) {
+    if (!$session_id) {
         throw new Exception('Erro ao criar sessão de upload');
     }
     
-    $session_token = $sessionInfo['token'];
-    $session_id = $sessionInfo['id'];
-    
-    // Obter informações da sessão para ter o expires_at formatado
-    $session_data = $uploadSession->getByToken($session_token);
-    if (!$session_data) {
+    // Obter informações da sessão, incluindo o token gerado
+    $uploadSession->getById($session_id);
+    if (!$uploadSession->token) {
         throw new Exception('Sessão de upload não encontrada após a criação');
     }
+    $session_token = $uploadSession->token;
 
     $fileModel = new File();
     $uploaded_files = [];
@@ -155,7 +153,7 @@ try {
                 $userData['email'], // Email do remetente
                 $title,
                 $session_token,
-                $session_data['expires_at'],
+                $uploadSession->expires_at,
                 count($uploaded_files),
                 $total_size
             );
@@ -166,7 +164,7 @@ try {
             $userData['email'],
             $title,
             $session_token,
-            $session_data['expires_at'],
+            $uploadSession->expires_at,
             count($uploaded_files),
             $total_size
         );

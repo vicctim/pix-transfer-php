@@ -16,9 +16,12 @@ class UploadSession {
         $this->db = Database::getInstance();
     }
     
-    public function create($user_id, $title, $recipient_email, $expires_at) {
+    public function create($user_id, $title, $recipient_email, $expires_in) {
         try {
             $token = $this->generateToken();
+
+            // Calcular a data de expiração
+            $expires_at = date('Y-m-d H:i:s', strtotime("+$expires_in days"));
             
             $stmt = $this->db->query(
                 "INSERT INTO upload_sessions (user_id, token, title, recipient_email, expires_at) VALUES (?, ?, ?, ?, ?)",
