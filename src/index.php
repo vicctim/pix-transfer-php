@@ -10,6 +10,9 @@ if (isset($_SESSION['user_id'])) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Adicionar log para a tentativa de login
+    file_put_contents('/var/www/html/logs/app.log', "[LOGIN_ATTEMPT] Tentativa de login recebida para o usuário: " . $_POST['username'] . "\n", FILE_APPEND);
+
     require_once 'models/User.php';
     
     $username = $_POST['username'] ?? '';

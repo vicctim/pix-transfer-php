@@ -46,11 +46,13 @@ RUN echo "upload_max_filesize = 10G" >> /usr/local/etc/php/conf.d/uploads.ini \
 # Configurar Apache para uploads grandes
 RUN echo "LimitRequestBody 10737418240" >> /etc/apache2/apache2.conf
 
-# Criar diretórios necessários
+# Criar diretórios e arquivos de log necessários
 RUN mkdir -p /var/www/html/uploads \
     && mkdir -p /var/www/html/logs \
+    && touch /var/www/html/logs/app.log \
     && chown -R www-data:www-data /var/www/html/uploads \
-    && chown -R www-data:www-data /var/www/html/logs
+    && chown -R www-data:www-data /var/www/html/logs \
+    && chmod -R 775 /var/www/html/logs
 
 WORKDIR /var/www/html
 

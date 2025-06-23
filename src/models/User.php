@@ -16,6 +16,8 @@ class User {
     
     public function authenticate($username, $password) {
         try {
+            file_put_contents('/var/www/html/logs/app.log', "[AUTH_START] Autenticando usuário: $username\n", FILE_APPEND);
+
             $stmt = $this->db->query(
                 "SELECT id, username, email, password_hash, role FROM users WHERE username = ? OR email = ?",
                 [$username, $username]
@@ -23,17 +25,29 @@ class User {
             
             $user = $stmt->fetch();
             
-            if ($user && password_verify($password, $user['password_hash'])) {
-                $this->id = $user['id'];
-                $this->username = $user['username'];
-                $this->email = $user['email'];
-                $this->role = $user['role'];
-                return true;
+            if ($user) {
+                file_put_contents('/var/www/html/logs/app.log', "[AUTH_USER_FOUND] Usuário encontrado: " . print_r($user, true) . "\n", FILE_APPEND);
+                
+                $isPasswordCorrect = password_verify($password, $user['password_hash']);
+                file_put_contents('/var/www/html/logs/app.log', "[AUTH_PASSWORD_VERIFY] A senha está correta? " . ($isPasswordCorrect ? 'Sim' : 'Não') . "\n", FILE_APPEND);
+
+                if ($isPasswordCorrect) {
+                    $this->id = $user['id'];
+                    $this->username = $user['username'];
+                    $this->email = $user['email'];
+                    $this->role = $user['role'];
+                    file_put_contents('/var/www/html/logs/app.log', "[AUTH_SUCCESS] Autenticação bem-sucedida para: $username\n", FILE_APPEND);
+                    return true;
+                }
+            } else {
+                file_put_contents('/var/www/html/logs/app.log', "[AUTH_USER_NOT_FOUND] Usuário não encontrado no banco de dados: $username\n", FILE_APPEND);
             }
             
+            file_put_contents('/var/www/html/logs/app.log', "[AUTH_FAIL] Falha na autenticação para: $username\n", FILE_APPEND);
             return false;
         } catch (Exception $e) {
             error_log("Erro na autenticação: " . $e->getMessage());
+            file_put_contents('/var/www/html/logs/app.log', "[AUTH_EXCEPTION] Exceção na autenticação: " . $e->getMessage() . "\n", FILE_APPEND);
             return false;
         }
     }
