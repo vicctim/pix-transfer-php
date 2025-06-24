@@ -111,4 +111,21 @@ class User {
             return false;
         }
     }
+    
+    public function updateUser($id, $username, $email, $role) {
+        try {
+            $stmt = $this->db->query(
+                "UPDATE users SET username = ?, email = ?, role = ? WHERE id = ?",
+                [$username, $email, $role, $id]
+            );
+            return $stmt->rowCount() > 0;
+        } catch (Exception $e) {
+            error_log("Erro ao atualizar usuário: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    public function deleteUser($id) {
+        return $this->delete($id);
+    }
 } 

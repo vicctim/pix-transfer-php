@@ -64,17 +64,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-bottom: 30px;
         }
         .logo {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background: #616161;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-            font-weight: bold;
-            margin: 0 auto 20px;
+            height: 120px;
+            width: auto;
+            margin: 0 auto 30px;
+            display: block;
         }
         .header h1 {
             font-size: 2rem;
@@ -110,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 1px solid #e0e0e0;
             border-radius: 8px;
             font-size: 1rem;
+            font-family: 'Titillium Web', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .btn {
             width: 100%;
@@ -132,34 +126,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 0.9rem;
             border: 1px solid #fcc;
         }
-        .demo-info {
-            background: #e8f5e9;
-            border: 1px solid #c8e6c9;
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 25px;
-            font-size: 0.9rem;
-            color: #388e3c;
-            text-align: left;
-        }
-        .demo-info strong {
-            display: block;
-            margin-bottom: 5px;
-        }
-        .links {
-            margin-top: 20px;
-            font-size: 0.9rem;
-            text-align: center;
-        }
-        .links a {
-            color: #7cb342;
-            text-decoration: none;
-        }
     </style>
 </head>
 <body>
     <div class="header">
-        <img src="src/img/logo.png" alt="Logo" style="height: 70px; width: auto; margin: 0 0 20px; display: block;">
+        <img src="src/img/logo.png" alt="Logo" class="logo">
         <h1>Compartilhamento de arquivos <span>Pix Filmes</span></h1>
         <p>Faça login para começar a enviar arquivos</p>
     </div>
@@ -180,12 +151,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <button type="submit" class="btn">Entrar</button>
         </form>
-    </div>
-
-    <div class="demo-info">
-        <strong>Informações de demonstração:</strong>
-        <p>Usuário: admin@transfer.com</p>
-        <p>Senha: password</p>
     </div>
 </body>
 </html> 

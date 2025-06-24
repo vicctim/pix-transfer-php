@@ -97,7 +97,9 @@ class UploadSession {
     public function getByUserId($user_id) {
         try {
             $stmt = $this->db->query(
-                "SELECT * FROM upload_sessions WHERE user_id = ? ORDER BY created_at DESC",
+                "SELECT us.*, u.username FROM upload_sessions us 
+                 JOIN users u ON us.user_id = u.id 
+                 WHERE us.user_id = ? ORDER BY us.created_at DESC",
                 [$user_id]
             );
             

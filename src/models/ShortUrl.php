@@ -105,6 +105,25 @@ class ShortUrl {
     }
     
     /**
+     * Busca o código curto a partir do token original
+     */
+    public function getByOriginalToken($original_token) {
+        try {
+            $stmt = $this->db->query(
+                "SELECT short_code FROM short_urls WHERE original_token = ? AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1",
+                [$original_token]
+            );
+            
+            $result = $stmt->fetch();
+            return $result ? $result['short_code'] : null;
+            
+        } catch (Exception $e) {
+            error_log("Erro ao buscar código curto: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Registra acesso a uma URL curta
      */
     public function logAccess($short_code, $ip_address, $user_agent = '') {

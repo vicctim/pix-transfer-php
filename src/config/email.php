@@ -33,7 +33,7 @@ class EmailService {
         $this->sendEmail($user_email, $user_subject, $user_message);
 
         // Template de notificação para o admin
-        $admin_subject = "Notificacao de Upload Pix Transfer";
+        $admin_subject = "Notificacao de Upload Pix Transfer - " . htmlspecialchars($title);
         $admin_message = $this->getUploadNotificationTemplate(
             $user_email,
             htmlspecialchars($title),
@@ -48,7 +48,7 @@ class EmailService {
     }
 
     public function sendDownloadNotificationEmail($downloader_ip, $owner_email, $session_token, $title) {
-        $subject = "Notificacao de Download Pix Transfer";
+        $subject = "Notificacao de Download Pix Transfer - " . htmlspecialchars($title);
         $download_link = "http://localhost:3131/download.php?token=" . $session_token;
         
         $message = $this->getDownloadNotificationTemplate(

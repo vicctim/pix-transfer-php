@@ -14,9 +14,14 @@ header('Content-Type: application/json');
 
 try {
     $input = json_decode(file_get_contents('php://input'), true);
+    
+    // Log para debug
+    error_log("Delete upload - Input recebido: " . json_encode($input));
+    
     $session_id = $input['id'] ?? 0;
 
     if (empty($session_id)) {
+        error_log("Delete upload - ID vazio ou não fornecido. Input: " . json_encode($input));
         throw new Exception('ID da sessão não fornecido');
     }
 

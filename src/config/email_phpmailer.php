@@ -40,7 +40,7 @@ class PHPMailerEmailService {
         $result1 = $this->sendEmail($user_email, $user_subject, $user_message);
 
         // Email para admin
-        $admin_subject = "Notificacao de Upload Pix Transfer";
+        $admin_subject = "Notificacao de Upload Pix Transfer - " . htmlspecialchars($title);
         $admin_message = $this->getEmailTemplate(
             "Novo Upload no Sistema",
             "Um novo upload foi realizado.",
@@ -61,7 +61,7 @@ class PHPMailerEmailService {
     }
 
     public function sendDownloadNotificationEmail($downloader_ip, $owner_email, $session_token, $title) {
-        $subject = "Notificacao de Download Pix Transfer";
+        $subject = "Notificacao de Download Pix Transfer - " . htmlspecialchars($title);
         $download_link = "http://localhost:3131/download/" . $session_token;
         
         $message = $this->getEmailTemplate(

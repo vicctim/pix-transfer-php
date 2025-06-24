@@ -157,7 +157,7 @@ if ($password_required && !$is_authorized) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Download - Upload System</title>
-    <link rel="icon" type="image/png" href="src/img/favicon.png">
+    <link rel="icon" type="image/png" href="/src/img/favicon.png">
     <style>
         @import url('https://fonts.googleapis.com/css?family=Titillium+Web:400,600,700');
         * {
@@ -387,7 +387,7 @@ if ($password_required && !$is_authorized) {
 <body>
     <div class="container">
         <div class="header">
-            <img src="src/img/logo.png" alt="Logo" style="height: 70px; width: auto; margin: 0 0 15px 0; display: block;">
+            <img src="/src/img/logo.png" alt="Logo" style="height: 120px; width: auto; margin: 0 auto 20px; display: block;">
             <h1>Download de Arquivos</h1>
             <p>Arquivos compartilhados por <?php echo htmlspecialchars($userData['username']); ?></p>
         </div>
