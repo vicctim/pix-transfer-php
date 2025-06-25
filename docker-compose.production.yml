@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  pix-transfer:
+    image: vicctim/pix-transfer-php:latest
+    environment:
+      # Configurações do banco de dados MySQL externo
+      - DB_HOST=mysql
+      - DB_NAME=pix-transfer
+      - DB_USER=root
+      - DB_PASS=GameNickelBack*
+      
+      # Configurações SMTP Zoho para produção
+      - SMTP_HOST=smtppro.zoho.com
+      - SMTP_PORT=587
+      - SMTP_USER=victor@pixfilmes.com
+      - SMTP_PASS=alucardAS12*
+      - SMTP_FROM=victor@pixfilmes.com
+      - SMTP_FROM_NAME=Pix Transfer
+      
+    volumes:
+      # Volumes para persistir dados importantes
+      - pix-transfer-uploads:/var/www/html/uploads
+      - pix-transfer-logs:/var/www/html/logs
+      
+    networks:
+      - minha-rede
+      
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: pause
+        order: stop-first
+      labels:
+        # Configurações do Traefik para produção
+        - "traefik.enable=true"
+        - "traefik.docker.network=minha-rede"
+        
+        # Roteamento principal
+        - "traefik.http.routers.pix-transfer.rule=Host(`arquivos.pixfilmes.com`)"
+        - "traefik.http.routers.pix-transfer.entrypoints=websecure"
+        - "traefik.http.routers.pix-transfer.tls=true"
+        - "traefik.http.routers.pix-transfer.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.pix-transfer.loadbalancer.server.port=80"
+        
+        # Middlewares de segurança
+        - "traefik.http.middlewares.pix-transfer-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+        - "traefik.http.middlewares.pix-transfer-headers.headers.customrequestheaders.X-Forwarded-Host=arquivos.pixfilmes.com"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.sslredirect=true"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.stsincludesubdomains=true"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.stspreload=true"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.stsseconds=31536000"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.forcestsheader=true"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.contenttypenosniff=true"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.browserxssfilter=true"
+        - "traefik.http.middlewares.pix-transfer-secure.headers.referrerpolicy=strict-origin-when-cross-origin"
+        
+        # Rate limiting para proteção
+        - "traefik.http.middlewares.pix-transfer-ratelimit.ratelimit.average=100"
+        - "traefik.http.middlewares.pix-transfer-ratelimit.ratelimit.burst=200"
+        - "traefik.http.middlewares.pix-transfer-ratelimit.ratelimit.period=1m"
+        
+        # Compressão
+        - "traefik.http.middlewares.pix-transfer-compress.compress=true"
+        
+        # Aplicar todos os middlewares
+        - "traefik.http.routers.pix-transfer.middlewares=pix-transfer-headers,pix-transfer-secure,pix-transfer-ratelimit,pix-transfer-compress"
+        
+        # Health check personalizado
+        - "traefik.http.services.pix-transfer.loadbalancer.healthcheck.path=/index.php"
+        - "traefik.http.services.pix-transfer.loadbalancer.healthcheck.interval=30s"
+        - "traefik.http.services.pix-transfer.loadbalancer.healthcheck.timeout=10s"
+        - "traefik.http.services.pix-transfer.loadbalancer.healthcheck.retries=3"
+
+# Volumes nomeados para persistência de dados
+volumes:
+  pix-transfer-uploads:
+    external: true
+    name: pix-transfer-uploads
+  pix-transfer-logs:
+    external: true
+    name: pix-transfer-logs
+
+# Rede externa para integração com Traefik
+networks:
+  minha-rede:
+    external: true

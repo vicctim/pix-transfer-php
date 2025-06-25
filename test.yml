@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  pix-transfer:
+    image: vicctim/pix-transfer-php:latest
+    environment:
+      - DB_HOST=mysql
+      - DB_NAME=pix-transfer
+      - DB_USER=root
+      - DB_PASS=GameNickelBack*
+      - SMTP_HOST=smtppro.zoho.com
+      - SMTP_PORT=587
+      - SMTP_USER=victor@pixfilmes.com
+      - SMTP_PASS=alucardAS12*
+      - SMTP_FROM=victor@pixfilmes.com
+      - SMTP_FROM_NAME=Pix Transfer
+    volumes:
+      - pix-transfer-uploads:/var/www/html/uploads
+      - pix-transfer-logs:/var/www/html/logs
+    networks:
+      - minha-rede
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.pix-transfer.rule=Host(`arquivos.pixfilmes.com`)"
+        - "traefik.http.routers.pix-transfer.entrypoints=websecure"
+        - "traefik.http.routers.pix-transfer.tls=true"
+        - "traefik.http.routers.pix-transfer.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.pix-transfer.loadbalancer.server.port=80"
+
+volumes:
+  pix-transfer-uploads:
+    external: true
+    name: pix-transfer-uploads
+  pix-transfer-logs:
+    external: true
+    name: pix-transfer-logs
+
+networks:
+  minha-rede:
+    external: true

@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  pix-transfer:
+    image: vicctim/pix-transfer-php:latest
+    environment:
+      - DB_HOST=mysql
+      - DB_NAME=pix-transfer
+      - DB_USER=root
+      - DB_PASS=GameNickelBack*
+      - SMTP_HOST=smtppro.zoho.com
+      - SMTP_PORT=587
+      - SMTP_USER=victor@pixfilmes.com
+      - SMTP_PASS=alucardAS12*
+      - SMTP_FROM=victor@pixfilmes.com
+      - SMTP_FROM_NAME=Pix Transfer
+    volumes:
+      # Volumes persistentes para uploads e logs
+      - pix-transfer-uploads:/var/www/html/uploads
+      - pix-transfer-logs:/var/www/html/logs
+    networks:
+      - minha-rede
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=minha-rede"
+        - "traefik.http.routers.pix-transfer.rule=Host(`arquivos.pixfilmes.com`)"
+        - "traefik.http.routers.pix-transfer.entrypoints=websecure"
+        - "traefik.http.routers.pix-transfer.tls=true"
+        - "traefik.http.routers.pix-transfer.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.pix-transfer.loadbalancer.server.port=80"
+        - "traefik.http.middlewares.pix-transfer-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+        - "traefik.http.middlewares.pix-transfer-headers.headers.customrequestheaders.X-Forwarded-Host=arquivos.pixfilmes.com"
+        - "traefik.http.routers.pix-transfer.middlewares=pix-transfer-headers"
+
+volumes:
+  pix-transfer-uploads:
+    external: true
+  pix-transfer-logs:
+    external: true
+
+networks:
+  minha-rede:
+    external: true

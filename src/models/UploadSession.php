@@ -148,6 +148,16 @@ class UploadSession {
         }
     }
     
+    public function cleanupExpired() {
+        try {
+            $stmt = $this->db->query("DELETE FROM upload_sessions WHERE expires_at < NOW()");
+            return $stmt->rowCount();
+        } catch (Exception $e) {
+            error_log("Erro ao limpar sessões expiradas: " . $e->getMessage());
+            return false;
+        }
+    }
+    
     private function generateToken() {
         return bin2hex(random_bytes(16));
     }

@@ -59,6 +59,10 @@ WORKDIR /var/www/html
 # Copiar código da aplicação
 COPY src/ /var/www/html/
 COPY database/ /var/www/html/database/
+COPY .htaccess /var/www/html/
+
+# Instalar dependências do Composer
+RUN cd /var/www/html && composer install --no-dev --optimize-autoloader
 
 # Criar arquivo de configuração de banco de dados no diretório raiz
 RUN echo '<?php \

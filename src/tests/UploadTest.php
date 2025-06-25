@@ -9,7 +9,7 @@ class UploadTest extends TestSuite {
     private $uploadSession;
     private $fileModel;
     private $user;
-    private $testUserId = 1;
+    private $testUserId = 6;
 
     public function __construct() {
         $this->uploadSession = new UploadSession();
@@ -61,7 +61,7 @@ class UploadTest extends TestSuite {
     }
 
     private function testCreateUploadSession() {
-        $token = $this->uploadSession->create($this->testUserId, 'Test Upload', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test Upload', 'test@example.com', 7);
         
         $this->assertNotEmpty($token, 'Token não deveria estar vazio');
         $this->assertTrue(strlen($token) >= 32, 'Token deveria ter pelo menos 32 caracteres');
@@ -71,13 +71,13 @@ class UploadTest extends TestSuite {
 
     private function testGetSessionByToken() {
         // Criar uma sessão primeiro
-        $token = $this->uploadSession->create($this->testUserId, 'Test Session', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test Session', 'test@example.com', 7);
         $session = $this->uploadSession->getByToken($token);
         
         $this->assertNotEmpty($session, 'Sessão deveria ser encontrada');
         $this->assertEquals($this->testUserId, $session['user_id'], 'User ID deveria corresponder');
         $this->assertEquals('Test Session', $session['title'], 'Título deveria corresponder');
-        $this->assertEquals('Test Description', $session['description'], 'Descrição deveria corresponder');
+        $this->assertEquals('test@example.com', $session['recipient_email'], 'Descrição deveria corresponder');
         
         return true;
     }
@@ -93,11 +93,11 @@ class UploadTest extends TestSuite {
 
     private function testCreateFile() {
         // Criar uma sessão primeiro
-        $token = $this->uploadSession->create($this->testUserId, 'Test File Session', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test File Session', 'test@example.com', 7);
         $session = $this->uploadSession->getByToken($token);
         
         // Criar um arquivo de teste
-        $testFilePath = '../uploads/test_file.txt';
+        $testFilePath = 'uploads/test_file.txt';
         file_put_contents($testFilePath, 'Test content');
         
         $result = $this->fileModel->create(
@@ -119,10 +119,10 @@ class UploadTest extends TestSuite {
 
     private function testGetFilesBySession() {
         // Criar uma sessão e arquivo
-        $token = $this->uploadSession->create($this->testUserId, 'Test Files Session', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test Files Session', 'test@example.com', 7);
         $session = $this->uploadSession->getByToken($token);
         
-        $testFilePath = '../uploads/test_file2.txt';
+        $testFilePath = 'uploads/test_file2.txt';
         file_put_contents($testFilePath, 'Test content 2');
         
         $this->fileModel->create(
@@ -147,11 +147,11 @@ class UploadTest extends TestSuite {
 
     private function testTotalSizeCalculation() {
         // Criar uma sessão e arquivos
-        $token = $this->uploadSession->create($this->testUserId, 'Test Size Session', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test Size Session', 'test@example.com', 7);
         $session = $this->uploadSession->getByToken($token);
         
-        $testFilePath1 = '../uploads/test_size1.txt';
-        $testFilePath2 = '../uploads/test_size2.txt';
+        $testFilePath1 = 'uploads/test_size1.txt';
+        $testFilePath2 = 'uploads/test_size2.txt';
         
         file_put_contents($testFilePath1, 'Test content 1');
         file_put_contents($testFilePath2, 'Test content 2');
@@ -172,12 +172,12 @@ class UploadTest extends TestSuite {
 
     private function testFileCount() {
         // Criar uma sessão e arquivos
-        $token = $this->uploadSession->create($this->testUserId, 'Test Count Session', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test Count Session', 'test@example.com', 7);
         $session = $this->uploadSession->getByToken($token);
         
-        $testFilePath1 = '../uploads/test_count1.txt';
-        $testFilePath2 = '../uploads/test_count2.txt';
-        $testFilePath3 = '../uploads/test_count3.txt';
+        $testFilePath1 = 'uploads/test_count1.txt';
+        $testFilePath2 = 'uploads/test_count2.txt';
+        $testFilePath3 = 'uploads/test_count3.txt';
         
         file_put_contents($testFilePath1, 'Test content 1');
         file_put_contents($testFilePath2, 'Test content 2');
@@ -201,7 +201,7 @@ class UploadTest extends TestSuite {
 
     private function testTokenValidation() {
         // Testar token válido
-        $token = $this->uploadSession->create($this->testUserId, 'Test Token Session', 'Test Description');
+        $token = $this->uploadSession->create($this->testUserId, 'Test Token Session', 'test@example.com', 7);
         $session = $this->uploadSession->getByToken($token);
         $this->assertNotEmpty($session, 'Token válido deveria retornar sessão');
         

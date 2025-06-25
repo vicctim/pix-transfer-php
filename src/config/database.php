@@ -18,8 +18,11 @@ class Database {
                 ]
             );
             
-            // Configurar timezone do MySQL
+            // Configurar timezone do MySQL para GMT-3 (America/Sao_Paulo)
             $this->connection->exec("SET time_zone = '-03:00'");
+            
+            // Configurar timezone do PHP
+            date_default_timezone_set('America/Sao_Paulo');
         } catch (PDOException $e) {
             error_log("Erro de conexão com banco de dados: " . $e->getMessage());
             throw new Exception("Erro de conexão com banco de dados");

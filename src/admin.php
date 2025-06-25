@@ -3,39 +3,283 @@ session_start();
 require_once 'models/User.php';
 require_once 'models/UploadSession.php';
 require_once 'models/File.php';
+require_once 'models/SystemSettings.php';
+require_once 'models/EmailTemplate.php';
+require_once 'models/DownloadLog.php';
 
 // Proteção da página: Apenas usuários logados e com role 'admin'
 if (!isset($_SESSION['user_id'])) {
-    header('Location: index.php');
+    header('Location: ../');
     exit();
 }
 
 $userModel = new User();
 if (!$userModel->isAdmin($_SESSION['user_id'])) {
-    header('Location: dashboard.php');
+    header('Location: ../dashboard');
     exit();
 }
 
+$settings = new SystemSettings();
+$emailTemplate = new EmailTemplate();
+$downloadLog = new DownloadLog();
+
+// Handle form submissions
+$message = '';
+$messageType = 'success';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        if (isset($_POST['action'])) {
+            switch ($_POST['action']) {
+                case 'update_settings':
+                    foreach ($_POST['settings'] as $key => $value) {
+                        $type = 'string';
+                        if (in_array($key, ['smtp_port', 'default_expiration_days', 'max_file_size'])) {
+                            $type = 'number';
+                        } elseif (in_array($key, ['cloudflare_tunnel_enabled'])) {
+                            $type = 'boolean';
+                        } elseif ($key === 'available_expiration_days') {
+                            $value = array_map('intval', explode(',', $value));
+                            $type = 'json';
+                        }
+                        $settings->set($key, $value, $type);
+                    }
+                    $message = 'Configurações atualizadas com sucesso!';
+                    break;
+                    
+                case 'update_email_template':
+                    $templateName = $_POST['template_name'];
+                    $subject = $_POST['subject'];
+                    $body = $_POST['body'];
+                    
+                    if ($emailTemplate->updateTemplate($templateName, $subject, $body)) {
+                        $message = 'Template de email atualizado com sucesso!';
+                    } else {
+                        throw new Exception('Erro ao atualizar template');
+                    }
+                    break;
+                    
+                case 'delete_user':
+                    $userId = $_POST['user_id'];
+                    if ($userModel->deleteUser($userId)) {
+                        $message = 'Usuário deletado com sucesso!';
+                    } else {
+                        throw new Exception('Erro ao deletar usuário');
+                    }
+                    break;
+                    
+                case 'update_user':
+                    $userId = $_POST['user_id'];
+                    $username = $_POST['username'];
+                    $email = $_POST['email'];
+                    $role = $_POST['role'];
+                    
+                    if ($userModel->updateUser($userId, $username, $email, $role)) {
+                        $message = 'Usuário atualizado com sucesso!';
+                    } else {
+                        throw new Exception('Erro ao atualizar usuário');
+                    }
+                    break;
+                    
+                case 'update_styling':
+                    // Save styling settings
+                    $settings->set('primary_color', $_POST['primary_color'] ?? '#4a7c59');
+                    $settings->set('secondary_color', $_POST['secondary_color'] ?? '#6a9ba5');
+                    $settings->set('background_color', $_POST['background_color'] ?? '#f7fcf5');
+                    $settings->set('text_color', $_POST['text_color'] ?? '#333333');
+                    $settings->set('success_color', $_POST['success_color'] ?? '#28a745');
+                    $settings->set('error_color', $_POST['error_color'] ?? '#dc3545');
+                    $message = 'Configurações de estilo salvas com sucesso!';
+                    break;
+                    
+                case 'add_user':
+                    $username = $_POST['username'];
+                    $email = $_POST['email'];
+                    $password = $_POST['password'];
+                    $role = $_POST['role'];
+                    
+                    if ($userModel->create($username, $email, $password, $role)) {
+                        $message = 'Usuário criado com sucesso!';
+                    } else {
+                        throw new Exception('Erro ao criar usuário');
+                    }
+                    break;
+                    
+                case 'update_email_templates':
+                    // Save all email templates
+                    foreach ($_POST['templates'] as $templateName => $templateData) {
+                        $settings->set('email_template_' . $templateName . '_subject', $templateData['subject']);
+                        $settings->set('email_template_' . $templateName . '_body', $templateData['body']);
+                    }
+                    $message = 'Templates de email atualizados com sucesso!';
+                    break;
+                    
+                case 'upload_logo':
+                    if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
+                        $uploadDir = 'src/img/';
+                        $allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+                        
+                        if (!in_array($_FILES['logo']['type'], $allowedTypes)) {
+                            throw new Exception('Apenas arquivos PNG e JPG são permitidos para o logo.');
+                        }
+                        
+                        if ($_FILES['logo']['size'] > 2 * 1024 * 1024) { // 2MB max
+                            throw new Exception('O arquivo do logo deve ter no máximo 2MB.');
+                        }
+                        
+                        $fileName = 'logo.' . pathinfo($_FILES['logo']['name'], PATHINFO_EXTENSION);
+                        $uploadPath = $uploadDir . $fileName;
+                        
+                        if (move_uploaded_file($_FILES['logo']['tmp_name'], $uploadPath)) {
+                            $settings->set('site_logo', $uploadPath);
+                            $message = 'Logo atualizado com sucesso!';
+                        } else {
+                            throw new Exception('Erro ao fazer upload do logo.');
+                        }
+                    }
+                    
+                    if (isset($_FILES['favicon']) && $_FILES['favicon']['error'] === UPLOAD_ERR_OK) {
+                        $uploadDir = 'src/img/';
+                        $allowedTypes = ['image/png', 'image/x-icon', 'image/vnd.microsoft.icon'];
+                        
+                        if (!in_array($_FILES['favicon']['type'], $allowedTypes)) {
+                            throw new Exception('Apenas arquivos PNG e ICO são permitidos para o favicon.');
+                        }
+                        
+                        if ($_FILES['favicon']['size'] > 1 * 1024 * 1024) { // 1MB max
+                            throw new Exception('O arquivo do favicon deve ter no máximo 1MB.');
+                        }
+                        
+                        $fileName = 'favicon.' . pathinfo($_FILES['favicon']['name'], PATHINFO_EXTENSION);
+                        $uploadPath = $uploadDir . $fileName;
+                        
+                        if (move_uploaded_file($_FILES['favicon']['tmp_name'], $uploadPath)) {
+                            $settings->set('site_favicon', $uploadPath);
+                            $message = 'Favicon atualizado com sucesso!';
+                        } else {
+                            throw new Exception('Erro ao fazer upload do favicon.');
+                        }
+                    }
+                    break;
+                    
+                case 'update_expiration':
+                    $uploadId = $_POST['upload_id'] ?? null;
+                    $newExpiration = $_POST['new_expiration'] ?? null;
+                    
+                    if (!$uploadId || !$newExpiration) {
+                        throw new Exception('Dados necessários não fornecidos');
+                    }
+                    
+                    // Validar formato da data
+                    $date = DateTime::createFromFormat('Y-m-d\TH:i', $newExpiration);
+                    if (!$date) {
+                        throw new Exception('Formato de data inválido');
+                    }
+                    
+                    // Verificar se a data não é no passado
+                    if ($date <= new DateTime()) {
+                        throw new Exception('A data de expiração deve ser no futuro');
+                    }
+                    
+                    $db = Database::getInstance();
+                    
+                    // Verificar se o upload existe
+                    $checkStmt = $db->query(
+                        "SELECT id FROM upload_sessions WHERE id = ?",
+                        [$uploadId]
+                    );
+                    
+                    if (!$checkStmt->fetch()) {
+                        throw new Exception('Upload não encontrado');
+                    }
+                    
+                    // Atualizar expiração
+                    $stmt = $db->query(
+                        "UPDATE upload_sessions SET expires_at = ?, expiration_notified = 0 WHERE id = ?",
+                        [$date->format('Y-m-d H:i:s'), $uploadId]
+                    );
+                    
+                    if ($stmt->rowCount() > 0) {
+                        $message = 'Expiração atualizada com sucesso!';
+                    } else {
+                        throw new Exception('Erro ao atualizar expiração no banco de dados');
+                    }
+                    break;
+                    
+                case 'delete_upload':
+                    $uploadId = $_POST['upload_id'] ?? null;
+                    
+                    if (!$uploadId) {
+                        throw new Exception('ID do upload não fornecido');
+                    }
+                    
+                    $db = Database::getInstance();
+                    
+                    // Verificar se o upload existe
+                    $checkStmt = $db->query(
+                        "SELECT id FROM upload_sessions WHERE id = ?",
+                        [$uploadId]
+                    );
+                    
+                    if (!$checkStmt->fetch()) {
+                        throw new Exception('Upload não encontrado');
+                    }
+                    
+                    // Buscar arquivos do upload para deletar fisicamente
+                    $filesStmt = $db->query(
+                        "SELECT file_path FROM files WHERE session_id = ?",
+                        [$uploadId]
+                    );
+                    $files = $filesStmt->fetchAll();
+                    
+                    // Deletar arquivos físicos
+                    foreach ($files as $file) {
+                        if (file_exists($file['file_path'])) {
+                            unlink($file['file_path']);
+                        }
+                    }
+                    
+                    // Deletar do banco (cascade vai remover files e logs relacionados)
+                    $stmt = $db->query(
+                        "DELETE FROM upload_sessions WHERE id = ?",
+                        [$uploadId]
+                    );
+                    
+                    if ($stmt->rowCount() > 0) {
+                        $message = 'Upload deletado com sucesso!';
+                    } else {
+                        throw new Exception('Erro ao deletar upload do banco de dados');
+                    }
+                    break;
+            }
+        }
+    } catch (Exception $e) {
+        $message = $e->getMessage();
+        $messageType = 'error';
+    }
+}
+
+// Get current data
 $uploadSessionModel = new UploadSession();
 $fileModel = new File();
 $allUsers = $userModel->getAllUsers();
 $allUploads = $uploadSessionModel->getAll();
-$selected_user_id = $_GET['user_id'] ?? null;
-$user_uploads = [];
+$systemSettings = $settings->getAll();
 
-if ($selected_user_id) {
-    $user_uploads = $uploadSessionModel->getByUserId($selected_user_id);
-}
+// Get tab
+$activeTab = $_GET['tab'] ?? 'dashboard';
 
-// Estatísticas do sistema
+// Statistics
 $totalUsers = count($allUsers);
 $totalUploads = count($allUploads);
 $totalFiles = 0;
 $totalSize = 0;
+$totalDownloads = 0;
 
 foreach ($allUploads as $upload) {
     $files = $fileModel->getBySessionId($upload['id']);
     $totalFiles += count($files);
+    $totalDownloads += $upload['download_count'] ?? 0;
     foreach ($files as $file) {
         $totalSize += $file['file_size'];
     }
@@ -50,1559 +294,1357 @@ function formatBytes($bytes, $precision = 2) {
     
     return round($bytes, $precision) . ' ' . $units[$i];
 }
+
+// Set timezone
+date_default_timezone_set($settings->getTimezone());
 ?>
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Administrativo - Upload System</title>
-    <link rel="icon" type="image/png" href="img/favicon.png">
+    <title>Painel Administrativo - <?php echo htmlspecialchars($settings->get('site_name', 'Pix Transfer')); ?></title>
+    <link rel="icon" type="image/png" href="<?php echo htmlspecialchars($settings->get('site_favicon', 'src/img/favicon.png')); ?>">
     <style>
         @import url('https://fonts.googleapis.com/css?family=Titillium+Web:400,600,700');
+        @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+        
+        :root {
+            --primary-color: <?php echo $settings->get('primary_color', '#4a7c59'); ?>;
+            --secondary-color: <?php echo $settings->get('secondary_color', '#6a9ba5'); ?>;
+            --background-color: <?php echo $settings->get('background_color', '#f7fcf5'); ?>;
+            --text-color: <?php echo $settings->get('text_color', '#333333'); ?>;
+            --success-color: <?php echo $settings->get('success_color', '#28a745'); ?>;
+            --error-color: <?php echo $settings->get('error_color', '#dc3545'); ?>;
+        }
         
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
             font-family: 'Titillium Web', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f7fcf5;
-            color: #333;
-            min-height: 100vh;
+            background: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
         }
-
-        .header {
-            background: white;
+        
+        .admin-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 20px 0;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 20px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
         }
-
-        .header-content {
-            max-width: 1600px;
+        
+        .admin-header .container {
+            max-width: 1200px;
             margin: 0 auto;
+            padding: 0 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+        }
+        
+        .admin-header h1 {
+            font-size: 1.8em;
+            font-weight: 700;
+        }
+        
+        .admin-header .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .admin-nav {
+            background: white;
+            border-bottom: 1px solid #dee2e6;
+            padding: 0;
+        }
+        
+        .admin-nav .container {
+            max-width: 1200px;
+            margin: 0 auto;
             padding: 0 20px;
         }
-
-        .logo {
+        
+        .nav-tabs {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .nav-tab {
+            margin-right: 30px;
+        }
+        
+        .nav-tab a {
             display: flex;
             align-items: center;
-            gap: 15px;
-        }
-
-        .logo img {
-            height: 50px;
-            width: auto;
-        }
-
-        .logo h1 {
-            color: #4CAF50;
-            font-size: 24px;
-            font-weight: 700;
-        }
-
-        .admin-badge {
-            background: linear-gradient(135deg, #FF9800, #F57C00);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-left: 10px;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .user-info span {
-            color: #666;
-            font-weight: 600;
-        }
-
-        .user-info a {
-            background: linear-gradient(135deg, #FFCDD2, #EF9A9A);
-            color: #C62828;
-            padding: 8px 16px;
-            border-radius: 6px;
+            gap: 8px;
+            padding: 15px 20px;
             text-decoration: none;
+            color: #6c757d;
             font-weight: 600;
             transition: all 0.3s ease;
-            border: 1px solid #FFCDD2;
-            margin-left: 8px;
+            border-bottom: 3px solid transparent;
         }
-
-        .user-info a:hover {
-            background: linear-gradient(135deg, #EF9A9A, #E57373);
-            transform: translateY(-1px);
+        
+        .nav-tab a:hover,
+        .nav-tab.active a {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
         }
-
+        
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
-            padding: 30px;
+            padding: 20px;
         }
-
-        .page-title {
-            color: #333;
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 30px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .page-title::before {
-            content: "🛠️";
-            font-size: 36px;
-        }
-
+        
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(5, 1fr);
             gap: 20px;
-            margin-bottom: 40px;
+            margin-bottom: 30px;
         }
-
+        
+        @media (max-width: 1200px) {
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+        }
+        
         .stat-card {
             background: white;
-            border-radius: 15px;
             padding: 25px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-            border-left: 5px solid;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
             transition: transform 0.3s ease;
         }
-
+        
         .stat-card:hover {
-            transform: translateY(-5px);
+            transform: translateY(-2px);
         }
-
-        .stat-card.users {
-            border-left-color: #4CAF50;
+        
+        .stat-card .icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+            color: var(--primary-color);
         }
-
-        .stat-card.uploads {
-            border-left-color: #2196F3;
-        }
-
-        .stat-card.files {
-            border-left-color: #FF9800;
-        }
-
-        .stat-card.storage {
-            border-left-color: #9C27B0;
-        }
-
-        .stat-icon {
-            font-size: 32px;
-            margin-bottom: 10px;
-        }
-
-        .stat-value {
-            font-size: 28px;
+        
+        .stat-card .number {
+            font-size: 2em;
             font-weight: 700;
             color: #333;
             margin-bottom: 5px;
         }
-
-        .stat-label {
-            color: #666;
-            font-size: 14px;
+        
+        .stat-card .label {
+            color: #6c757d;
             font-weight: 600;
         }
-
-        .admin-section {
+        
+        .card {
             background: white;
-            border-radius: 15px;
-            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             margin-bottom: 30px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            overflow: hidden;
         }
-
-        .section-title {
-            color: #333;
-            font-size: 22px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
+        
+        .card-header {
+            padding: 20px;
+            border-bottom: 1px solid #dee2e6;
+            background: #f8f9fa;
         }
-
+        
+        .card-header h3 {
+            margin: 0;
+            color: #495057;
+            font-weight: 600;
+        }
+        
+        .card-body {
+            padding: 20px;
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
         .form-group {
             margin-bottom: 20px;
         }
-
-        .form-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .form-label {
+        
+        .form-group label {
             display: block;
+            margin-bottom: 5px;
             font-weight: 600;
-            color: #555;
-            margin-bottom: 8px;
-            font-size: 14px;
+            color: #495057;
         }
-
-        .form-input, .form-select {
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
             width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 16px;
+            padding: 10px 15px;
+            border: 2px solid #dee2e6;
+            border-radius: 5px;
+            font-size: 14px;
             transition: border-color 0.3s ease;
-            font-family: 'Titillium Web', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-
-        .form-input:focus, .form-select:focus {
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
             outline: none;
-            border-color: #4CAF50;
-            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+            border-color: var(--primary-color);
         }
-
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        
         .btn {
-            padding: 12px 25px;
+            display: inline-block;
+            padding: 10px 20px;
+            background: var(--primary-color);
+            color: white;
+            text-decoration: none;
             border: none;
-            border-radius: 8px;
-            font-size: 16px;
+            border-radius: 5px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
         }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #4CAF50, #45a049);
-            color: white;
+        
+        .btn:hover {
+            filter: brightness(0.9);
+            transform: translateY(-1px);
         }
-
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #45a049, #3d8b40);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
-        }
-
+        
         .btn-danger {
-            background: linear-gradient(135deg, #FFCDD2, #EF9A9A);
-            color: #C62828;
+            background: var(--error-color);
         }
-
+        
         .btn-danger:hover {
-            background: linear-gradient(135deg, #EF9A9A, #E57373);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(239, 154, 154, 0.3);
+            filter: brightness(0.9);
         }
-
-        .btn-secondary {
-            background: linear-gradient(135deg, #78909C, #607D8B);
-            color: white;
+        
+        .btn-success {
+            background: var(--primary-color) !important;
         }
-
-        .btn-secondary:hover {
-            background: linear-gradient(135deg, #607D8B, #546E7A);
-            transform: translateY(-2px);
+        
+        .btn-success:hover {
+            filter: brightness(0.85) !important;
         }
-
-        .uploads-table {
+        
+        .table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
         }
-
-        .uploads-table th,
-        .uploads-table td {
-            padding: 15px;
+        
+        .table th,
+        .table td {
+            padding: 12px;
             text-align: left;
-            border-bottom: 1px solid #e0e0e0;
+            border-bottom: 1px solid #dee2e6;
         }
-
-        .uploads-table th {
+        
+        .table th {
             background: #f8f9fa;
             font-weight: 600;
-            color: #555;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            color: #495057;
         }
-
-        .uploads-table tr:hover {
+        
+        .table tr:hover {
             background: #f8f9fa;
         }
-
-        .upload-title {
-            font-weight: 600;
-            color: #333;
+        
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
         }
-
-        .upload-date {
-            color: #666;
-            font-size: 14px;
+        
+        .alert-success {
+            background: color-mix(in srgb, var(--success-color) 20%, white);
+            color: color-mix(in srgb, var(--success-color) 80%, black);
+            border: 1px solid color-mix(in srgb, var(--success-color) 40%, white);
         }
-
-        .upload-expires {
-            font-size: 14px;
+        
+        .alert-error {
+            background: color-mix(in srgb, var(--error-color) 20%, white);
+            color: color-mix(in srgb, var(--error-color) 80%, black);
+            border: 1px solid color-mix(in srgb, var(--error-color) 40%, white);
         }
-
-        .expires-soon {
-            color: #FF9800;
-            font-weight: 600;
+        
+        .tab-content {
+            display: none;
         }
-
-        .expired {
-            color: #EF5350;
-            font-weight: 600;
+        
+        .tab-content.active {
+            display: block;
         }
-
-        .status-badge {
-            padding: 4px 12px;
+        
+        .help-text {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .template-variables {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .template-variables h4 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+        
+        .variables-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .variable-tag {
+            background: var(--primary-color);
+            color: white;
+            padding: 5px 10px;
             border-radius: 15px;
             font-size: 12px;
-            font-weight: 600;
-        }
-
-        .status-active {
-            background: rgba(76, 175, 80, 0.1);
-            color: #4CAF50;
-        }
-
-        .status-expired {
-            background: rgba(239, 83, 80, 0.1);
-            color: #EF5350;
-        }
-
-        .status-admin {
-            background: rgba(255, 152, 0, 0.1);
-            color: #FF9800;
-        }
-
-        .status-user {
-            background: rgba(33, 150, 243, 0.1);
-            color: #2196F3;
-        }
-
-        /* Modal de uploads do usuário */
-        .user-uploads-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            backdrop-filter: blur(5px);
-        }
-
-        .user-uploads-modal.show {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .user-uploads-content {
-            background: white;
-            border-radius: 15px;
-            width: 90%;
-            max-width: 1000px;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            transform: scale(0.7);
-            opacity: 0;
-            transition: all 0.3s ease;
-        }
-
-        .user-uploads-modal.show .user-uploads-content {
-            transform: scale(1);
-            opacity: 1;
-        }
-
-        .user-uploads-header {
-            background: linear-gradient(135deg, #4CAF50, #45a049);
-            color: white;
-            padding: 25px;
-            border-radius: 15px 15px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .user-uploads-title {
-            font-size: 22px;
-            font-weight: 700;
-            margin: 0;
-        }
-
-        .modal-close {
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            font-size: 24px;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s ease;
         }
-
-        .modal-close:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: scale(1.1);
+        
+        .variable-tag:hover {
+            filter: brightness(0.9);
         }
-
-        .user-uploads-body {
-            padding: 25px;
-        }
-
-        .upload-item-modal {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border: 1px solid #e0e0e0;
-            transition: all 0.3s ease;
-        }
-
-        .upload-item-modal:hover {
-            border-color: #4CAF50;
-            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.1);
-        }
-
-        .upload-header-modal {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
-        }
-
-        .upload-info-modal {
-            flex: 1;
-        }
-
-        .upload-title-modal {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .upload-meta-modal {
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 3px;
-        }
-
-        .upload-status-modal {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .upload-actions-modal {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .btn-modal {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-copy {
-            background: linear-gradient(135deg, #2196F3, #1976D2);
-            color: white;
-        }
-
-        .btn-copy:hover {
-            background: linear-gradient(135deg, #1976D2, #1565C0);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
-        }
-
-        .btn-expiry {
-            background: linear-gradient(135deg, #FF9800, #F57C00);
-            color: white;
-        }
-
-        .btn-expiry:hover {
-            background: linear-gradient(135deg, #F57C00, #EF6C00);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
-        }
-
-        .btn-view {
-            background: linear-gradient(135deg, #9C27B0, #7B1FA2);
-            color: white;
-        }
-
-        .btn-view:hover {
-            background: linear-gradient(135deg, #7B1FA2, #6A1B9A);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(156, 39, 176, 0.3);
-        }
-
-        .btn-delete-modal {
-            background: linear-gradient(135deg, #FFCDD2, #EF9A9A);
-            color: #C62828;
-            border: 1px solid #FFCDD2;
-        }
-
-        .btn-delete-modal:hover {
-            background: linear-gradient(135deg, #EF9A9A, #E57373);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(239, 154, 154, 0.3);
-        }
-
-        .empty-uploads {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-
-        .empty-uploads-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
-            opacity: 0.6;
-        }
-
-        @media (max-width: 768px) {
-            .user-uploads-content {
-                width: 95%;
-                margin: 20px;
-            }
-
-            .upload-header-modal {
-                flex-direction: column;
-                gap: 15px;
-            }
-
-            .upload-actions-modal {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .btn-modal {
-                flex: 1;
-                justify-content: center;
-            }
-        }
-
-        /* Modal styles from dashboard */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            backdrop-filter: blur(5px);
-        }
-
-        .modal-content {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            max-width: 500px;
-            width: 90%;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            transform: scale(0.8);
-            transition: all 0.3s ease;
-        }
-
-        .modal-overlay.show {
-            display: flex;
-        }
-
-        .modal-overlay.show .modal-content {
-            transform: scale(1);
-        }
-
-        .modal-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 25px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #f0f0f0;
-        }
-
-        .modal-icon {
-            font-size: 32px;
-            margin-right: 15px;
-            color: #ffc107;
-        }
-
-        .modal-title {
-            font-size: 24px;
-            font-weight: 600;
-            color: #333;
-            margin: 0;
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 15px;
-            justify-content: flex-end;
-            margin-top: 25px;
-        }
-
-        .modal-btn {
-            padding: 12px 25px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            min-width: 120px;
-        }
-
-        .modal-btn-primary {
-            background: #4CAF50;
-            color: white;
-        }
-
-        .modal-btn-primary:hover {
-            background: #45a049;
-            transform: translateY(-2px);
-        }
-
-        .modal-btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-
-        .modal-btn-secondary:hover {
-            background: #5a6268;
-            transform: translateY(-2px);
-        }
-
-        .current-expiration {
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid #e0e0e0;
-            color: #666;
-            font-weight: 500;
-        }
-
-        /* Confirm modal styles */
-        .confirm-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.6);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 1500;
-            backdrop-filter: blur(5px);
-        }
-
-        .confirm-modal.show {
-            display: flex;
-        }
-
-        .confirm-content {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 450px;
-            width: 90%;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            transform: scale(0.9);
-            transition: all 0.3s ease;
-        }
-
-        .confirm-modal.show .confirm-content {
-            transform: scale(1);
-        }
-
-        .confirm-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .confirm-icon {
-            font-size: 32px;
-            margin-right: 15px;
-            color: #ff9800;
-        }
-
-        .confirm-title {
-            font-size: 22px;
-            font-weight: 600;
-            color: #333;
-            margin: 0;
-        }
-
-        .confirm-message {
-            color: #666;
-            font-size: 16px;
-            line-height: 1.5;
-            margin-bottom: 25px;
-        }
-
-        .confirm-actions {
-            display: flex;
-            gap: 15px;
-            justify-content: flex-end;
-        }
-
-        .confirm-btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            min-width: 100px;
-        }
-
-        .confirm-btn-danger {
-            background: #EF5350;
-            color: white;
-        }
-
-        .confirm-btn-danger:hover {
-            background: #E53935;
-            transform: translateY(-2px);
-        }
-
-        .confirm-btn-cancel {
-            background: #6c757d;
-            color: white;
-        }
-
-        .confirm-btn-cancel:hover {
-            background: #5a6268;
-            transform: translateY(-2px);
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-
-        .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-            opacity: 0.5;
-        }
-
-        .nav-links {
+        
+        .upload-actions {
             display: flex;
             gap: 10px;
-            margin-left: auto;
-            margin-right: 20px;
         }
-
-        .nav-link {
-            padding: 8px 16px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 600;
+        
+        .upload-actions .btn {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .color-preset {
             transition: all 0.3s ease;
         }
-
-        .nav-link.dashboard {
-            background: rgba(76, 175, 80, 0.1);
-            color: #4CAF50;
+        
+        .color-preset:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
         }
-
-        .nav-link.dashboard:hover {
-            background: rgba(76, 175, 80, 0.2);
+        
+        .color-preset:active {
+            transform: scale(1.05);
         }
-
+        
         @media (max-width: 768px) {
-            .header-content {
-                flex-direction: column;
-                gap: 15px;
+            .form-group [style*="grid-template-columns"] {
+                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
             }
-
-            .container {
-                padding: 20px;
+            
+            .color-preset {
+                padding: 12px !important;
             }
-
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            }
-
-            .uploads-table {
-                font-size: 14px;
-            }
-
-            .uploads-table th,
-            .uploads-table td {
-                padding: 10px 8px;
+            
+            .color-preset div {
+                font-size: 10px !important;
             }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="header-content">
-            <div class="logo">
-                <img src="/src/img/logo.png" alt="Logo">
-                <h1>Pix Transfer</h1>
-            </div>
-            <div class="nav-links">
-                <a href="dashboard.php" class="nav-link dashboard">📊 Dashboard</a>
-            </div>
+    <div class="admin-header">
+        <div class="container">
+            <h1><i class="fas fa-cog"></i> Painel Administrativo</h1>
             <div class="user-info">
-                <span>
-                    <?php echo htmlspecialchars($_SESSION['username']); ?>
-                    <span class="admin-badge">ADMIN</span>
-                </span>
-                <a href="logout.php">Sair</a>
+                <span>Bem-vindo, Admin</span>
+                <a href="../dashboard" class="btn">
+                    <i class="fas fa-upload"></i> Upload
+                </a>
+                <a href="logout.php" class="btn btn-danger">
+                    <i class="fas fa-sign-out-alt"></i> Sair
+                </a>
             </div>
+        </div>
+    </div>
+
+    <div class="admin-nav">
+        <div class="container">
+            <ul class="nav-tabs">
+                <li class="nav-tab <?php echo $activeTab === 'dashboard' ? 'active' : ''; ?>">
+                    <a href="?tab=dashboard"><i class="fas fa-chart-bar"></i> Dashboard</a>
+                </li>
+                <li class="nav-tab <?php echo $activeTab === 'settings' ? 'active' : ''; ?>">
+                    <a href="?tab=settings"><i class="fas fa-cog"></i> Configurações</a>
+                </li>
+                <li class="nav-tab <?php echo $activeTab === 'email' ? 'active' : ''; ?>">
+                    <a href="?tab=email"><i class="fas fa-envelope"></i> Templates de Email</a>
+                </li>
+                <li class="nav-tab <?php echo $activeTab === 'users' ? 'active' : ''; ?>">
+                    <a href="?tab=users"><i class="fas fa-users"></i> Usuários</a>
+                </li>
+                <li class="nav-tab <?php echo $activeTab === 'uploads' ? 'active' : ''; ?>">
+                    <a href="?tab=uploads"><i class="fas fa-upload"></i> Uploads</a>
+                </li>
+                <li class="nav-tab <?php echo $activeTab === 'styling' ? 'active' : ''; ?>">
+                    <a href="?tab=styling"><i class="fas fa-palette"></i> Estilização</a>
+                </li>
+            </ul>
         </div>
     </div>
 
     <div class="container">
-        <h1 class="page-title">Painel Administrativo</h1>
+        <?php if ($message): ?>
+            <div class="alert alert-<?php echo $messageType; ?>">
+                <?php echo htmlspecialchars($message); ?>
+            </div>
+        <?php endif; ?>
 
-        <!-- Estatísticas do Sistema -->
-        <div class="stats-grid">
-            <div class="stat-card users">
-                <div class="stat-icon">👥</div>
-                <div class="stat-value"><?php echo $totalUsers; ?></div>
-                <div class="stat-label">Usuários Registrados</div>
+        <!-- Dashboard Tab -->
+        <div class="tab-content <?php echo $activeTab === 'dashboard' ? 'active' : ''; ?>">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="icon"><i class="fas fa-users"></i></div>
+                    <div class="number"><?php echo $totalUsers; ?></div>
+                    <div class="label">Usuários</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="icon"><i class="fas fa-upload"></i></div>
+                    <div class="number"><?php echo $totalUploads; ?></div>
+                    <div class="label">Uploads</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="icon"><i class="fas fa-file"></i></div>
+                    <div class="number"><?php echo $totalFiles; ?></div>
+                    <div class="label">Arquivos</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="icon"><i class="fas fa-download"></i></div>
+                    <div class="number"><?php echo $totalDownloads; ?></div>
+                    <div class="label">Downloads</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="icon"><i class="fas fa-hdd"></i></div>
+                    <div class="number"><?php echo formatBytes($totalSize); ?></div>
+                    <div class="label">Espaço Usado</div>
+                </div>
             </div>
-            <div class="stat-card uploads">
-                <div class="stat-icon">📤</div>
-                <div class="stat-value"><?php echo $totalUploads; ?></div>
-                <div class="stat-label">Sessões de Upload</div>
-            </div>
-            <div class="stat-card files">
-                <div class="stat-icon">📁</div>
-                <div class="stat-value"><?php echo $totalFiles; ?></div>
-                <div class="stat-label">Arquivos Totais</div>
-            </div>
-            <div class="stat-card storage">
-                <div class="stat-icon">💾</div>
-                <div class="stat-value"><?php echo formatBytes($totalSize); ?></div>
-                <div class="stat-label">Armazenamento Usado</div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-clock"></i> Uploads Recentes</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Título</th>
+                                <th>Usuário</th>
+                                <th>Arquivos</th>
+                                <th>Downloads</th>
+                                <th>Criado em</th>
+                                <th>Expira em</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (array_slice($allUploads, 0, 10) as $upload): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($upload['title']); ?></td>
+                                    <td><?php echo htmlspecialchars($upload['username']); ?></td>
+                                    <td><?php echo count($fileModel->getBySessionId($upload['id'])); ?></td>
+                                    <td><?php echo $upload['download_count'] ?? 0; ?></td>
+                                    <td><?php echo date('d/m/Y H:i', strtotime($upload['created_at'])); ?></td>
+                                    <td><?php echo date('d/m/Y H:i', strtotime($upload['expires_at'])); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
-        <!-- Seção de Adicionar Usuário -->
-        <div class="admin-section">
-            <h2 class="section-title">👤 Adicionar Novo Usuário</h2>
-            <form action="admin_handler.php" method="POST">
-                <input type="hidden" name="action" value="add_user">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label" for="username">Nome de Usuário</label>
-                        <input type="text" id="username" name="username" class="form-input" required>
+        <!-- Settings Tab -->
+        <div class="tab-content <?php echo $activeTab === 'settings' ? 'active' : ''; ?>">
+            <form method="POST">
+                <input type="hidden" name="action" value="update_settings">
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-globe"></i> Configurações Gerais</h3>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="email">Email</label>
-                        <input type="email" id="email" name="email" class="form-input" required>
+                    <div class="card-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="site_name">Nome do Sistema</label>
+                                <input type="text" id="site_name" name="settings[site_name]" value="<?php echo htmlspecialchars($systemSettings['site_name'] ?? 'Pix Transfer'); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="site_url">URL do Sistema</label>
+                                <input type="url" id="site_url" name="settings[site_url]" value="<?php echo htmlspecialchars($systemSettings['site_url'] ?? ''); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="admin_email">Email do Administrador</label>
+                                <input type="email" id="admin_email" name="settings[admin_email]" value="<?php echo htmlspecialchars($systemSettings['admin_email'] ?? ''); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="default_expiration_days">Dias de Expiração Padrão</label>
+                                <input type="number" id="default_expiration_days" name="settings[default_expiration_days]" value="<?php echo htmlspecialchars($systemSettings['default_expiration_days'] ?? 7); ?>">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="available_expiration_days">Opções de Expiração (separadas por vírgula)</label>
+                            <input type="text" id="available_expiration_days" name="settings[available_expiration_days]" value="<?php echo implode(',', $systemSettings['available_expiration_days'] ?? [1,3,7,14,30]); ?>">
+                            <div class="help-text">Dias disponíveis no dropdown de expiração</div>
+                        </div>
                     </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label" for="password">Senha</label>
-                        <input type="password" id="password" name="password" class="form-input" required>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-envelope"></i> Configurações SMTP</h3>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="role">Função</label>
-                        <select id="role" name="role" class="form-select" required>
-                            <option value="user">Usuário</option>
-                            <option value="admin">Administrador</option>
-                        </select>
+                    <div class="card-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="smtp_host">Servidor SMTP</label>
+                                <input type="text" id="smtp_host" name="settings[smtp_host]" value="<?php echo htmlspecialchars($systemSettings['smtp_host'] ?? ''); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp_port">Porta SMTP</label>
+                                <input type="number" id="smtp_port" name="settings[smtp_port]" value="<?php echo htmlspecialchars($systemSettings['smtp_port'] ?? 587); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp_username">Usuário SMTP</label>
+                                <input type="text" id="smtp_username" name="settings[smtp_username]" value="<?php echo htmlspecialchars($systemSettings['smtp_username'] ?? ''); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp_password">Senha SMTP</label>
+                                <input type="password" id="smtp_password" name="settings[smtp_password]" value="<?php echo htmlspecialchars($systemSettings['smtp_password'] ?? ''); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp_encryption">Criptografia</label>
+                                <select id="smtp_encryption" name="settings[smtp_encryption]">
+                                    <option value="tls" <?php echo ($systemSettings['smtp_encryption'] ?? 'tls') === 'tls' ? 'selected' : ''; ?>>TLS</option>
+                                    <option value="ssl" <?php echo ($systemSettings['smtp_encryption'] ?? '') === 'ssl' ? 'selected' : ''; ?>>SSL</option>
+                                    <option value="" <?php echo ($systemSettings['smtp_encryption'] ?? '') === '' ? 'selected' : ''; ?>>Nenhuma</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp_from_email">Email Remetente</label>
+                                <input type="email" id="smtp_from_email" name="settings[smtp_from_email]" value="<?php echo htmlspecialchars($systemSettings['smtp_from_email'] ?? ''); ?>">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp_from_name">Nome do Remetente</label>
+                                <input type="text" id="smtp_from_name" name="settings[smtp_from_name]" value="<?php echo htmlspecialchars($systemSettings['smtp_from_name'] ?? ''); ?>">
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary">
-                    ➕ Adicionar Usuário
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-cloud"></i> Configurações Avançadas</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" name="settings[cloudflare_tunnel_enabled]" value="1" <?php echo ($systemSettings['cloudflare_tunnel_enabled'] ?? false) ? 'checked' : ''; ?>>
+                                Habilitar Cloudflare Tunnel
+                            </label>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="cloudflare_tunnel_url">URL do Cloudflare Tunnel</label>
+                            <input type="url" id="cloudflare_tunnel_url" name="settings[cloudflare_tunnel_url]" value="<?php echo htmlspecialchars($systemSettings['cloudflare_tunnel_url'] ?? ''); ?>">
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success">
+                    <i class="fas fa-save"></i> Salvar Configurações
                 </button>
             </form>
         </div>
 
-        <!-- Seção de Gerenciar Usuários -->
-        <div class="admin-section">
-            <h2 class="section-title">👥 Gerenciar Usuários</h2>
-            
-            <?php if (!empty($allUsers)): ?>
-                <table class="uploads-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Nome</th>
-                            <th>Email</th>
-                            <th>Função</th>
-                            <th>Data de Criação</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($allUsers as $user): ?>
-                            <tr>
-                                <td><strong><?php echo $user['id']; ?></strong></td>
-                                <td>
-                                    <div class="upload-title">
-                                        <?php echo htmlspecialchars($user['username']); ?>
-                                    </div>
-                                </td>
-                                <td><?php echo htmlspecialchars($user['email']); ?></td>
-                                <td>
-                                    <span class="status-badge <?php echo $user['role'] === 'admin' ? 'status-admin' : 'status-user'; ?>">
-                                        <?php echo $user['role'] === 'admin' ? 'ADMIN' : 'USUÁRIO'; ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <div class="upload-date">
-                                        <?php echo isset($user['created_at']) ? date('d/m/Y H:i', strtotime($user['created_at'])) : 'N/A'; ?>
-                                    </div>
-                                </td>
-                                <td>
-                                    <?php 
-                                    $protectedEmails = ['victor@pixfilmes.com'];
-                                    $isProtectedUser = in_array($user['email'], $protectedEmails);
-                                    $isSelf = $user['id'] == $_SESSION['user_id'];
-                                    ?>
-                                    
-                                    <?php if (!$isProtectedUser): ?>
-                                        <button class="btn btn-secondary" onclick="editUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>', '<?php echo htmlspecialchars($user['email']); ?>', '<?php echo $user['role']; ?>')" style="margin-right: 5px;">
-                                            ✏️ Editar
-                                        </button>
-                                    <?php else: ?>
-                                        <span class="status-badge status-admin" style="margin-right: 5px;">🔒 PROTEGIDO</span>
-                                    <?php endif; ?>
-                                    
-                                    <?php if (!$isSelf && !$isProtectedUser): ?>
-                                        <button class="btn btn-danger" onclick="deleteUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')">
-                                            🗑️ Excluir
-                                        </button>
-                                    <?php elseif ($isSelf): ?>
-                                        <span class="status-badge status-user">👤 VOCÊ</span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php else: ?>
-                <div class="empty-state">
-                    <div class="empty-state-icon">👤</div>
-                    <h3>Nenhum usuário encontrado</h3>
-                    <p>Ainda não há usuários no sistema.</p>
+        <!-- Email Templates Tab -->
+        <div class="tab-content <?php echo $activeTab === 'email' ? 'active' : ''; ?>">
+            <form method="POST">
+                <input type="hidden" name="action" value="update_email_templates">
+                
+                <!-- Upload Complete Template -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-envelope-open-text"></i> Template: Upload Completo</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="template-variables">
+                            <h4>Variáveis Disponíveis:</h4>
+                            <div class="variables-list">
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{SITE_NAME}}')">{SITE_NAME}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{SENDER_NAME}}')">{SENDER_NAME}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{TITLE}}')">{TITLE}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{FILE_COUNT}}')">{FILE_COUNT}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{TOTAL_SIZE}}')">{TOTAL_SIZE}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{DOWNLOAD_URL}}')">{DOWNLOAD_URL}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{SHORT_URL}}')">{SHORT_URL}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{EXPIRES_AT}}')">{EXPIRES_AT}</span>
+                                <span class="variable-tag" onclick="insertVariable('upload_complete_body', '{{CUSTOM_MESSAGE}}')">{CUSTOM_MESSAGE}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="upload_complete_subject">Assunto</label>
+                            <input type="text" id="upload_complete_subject" name="templates[upload_complete][subject]" value="<?php echo htmlspecialchars($settings->get('email_template_upload_complete_subject', 'Arquivos compartilhados - {TITLE}')); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="upload_complete_body">Corpo do Email</label>
+                            <textarea id="upload_complete_body" name="templates[upload_complete][body]" rows="8" required><?php echo htmlspecialchars($settings->get('email_template_upload_complete_body', 'Olá!\n\n{SENDER_NAME} compartilhou {FILE_COUNT} arquivo(s) com você através do {SITE_NAME}.\n\nTítulo: {TITLE}\nTamanho total: {TOTAL_SIZE}\nExpira em: {EXPIRES_AT}\n\n{CUSTOM_MESSAGE}\n\nPara baixar os arquivos, clique no link abaixo:\n{DOWNLOAD_URL}\n\nOu use este link curto:\n{SHORT_URL}\n\nObrigado por usar o {SITE_NAME}!')); ?></textarea>
+                        </div>
+                    </div>
                 </div>
-            <?php endif; ?>
+                
+                <!-- Download Notification Template -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-envelope-open-text"></i> Template: Notificação de Download</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="template-variables">
+                            <h4>Variáveis Disponíveis:</h4>
+                            <div class="variables-list">
+                                <span class="variable-tag" onclick="insertVariable('download_notification_body', '{{SITE_NAME}}')">{SITE_NAME}</span>
+                                <span class="variable-tag" onclick="insertVariable('download_notification_body', '{{TITLE}}')">{TITLE}</span>
+                                <span class="variable-tag" onclick="insertVariable('download_notification_body', '{{DOWNLOAD_IP}}')">{DOWNLOAD_IP}</span>
+                                <span class="variable-tag" onclick="insertVariable('download_notification_body', '{{DOWNLOAD_LOCATION}}')">{DOWNLOAD_LOCATION}</span>
+                                <span class="variable-tag" onclick="insertVariable('download_notification_body', '{{DOWNLOAD_TIME}}')">{DOWNLOAD_TIME}</span>
+                                <span class="variable-tag" onclick="insertVariable('download_notification_body', '{{TOTAL_DOWNLOADS}}')">{TOTAL_DOWNLOADS}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="download_notification_subject">Assunto</label>
+                            <input type="text" id="download_notification_subject" name="templates[download_notification][subject]" value="<?php echo htmlspecialchars($settings->get('email_template_download_notification_subject', 'Seus arquivos foram baixados - {TITLE}')); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="download_notification_body">Corpo do Email</label>
+                            <textarea id="download_notification_body" name="templates[download_notification][body]" rows="6" required><?php echo htmlspecialchars($settings->get('email_template_download_notification_body', 'Olá!\n\nSeus arquivos "{TITLE}" foram baixados.\n\nDetalhes do download:\n- IP: {DOWNLOAD_IP}\n- Localização: {DOWNLOAD_LOCATION}\n- Data/Hora: {DOWNLOAD_TIME}\n- Total de downloads: {TOTAL_DOWNLOADS}\n\nObrigado por usar o {SITE_NAME}!')); ?></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Expiration Warning Template -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-envelope-open-text"></i> Template: Aviso de Expiração</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="template-variables">
+                            <h4>Variáveis Disponíveis:</h4>
+                            <div class="variables-list">
+                                <span class="variable-tag" onclick="insertVariable('expiration_warning_body', '{{SITE_NAME}}')">{SITE_NAME}</span>
+                                <span class="variable-tag" onclick="insertVariable('expiration_warning_body', '{{TITLE}}')">{TITLE}</span>
+                                <span class="variable-tag" onclick="insertVariable('expiration_warning_body', '{{EXPIRES_AT}}')">{EXPIRES_AT}</span>
+                                <span class="variable-tag" onclick="insertVariable('expiration_warning_body', '{{DOWNLOAD_URL}}')">{DOWNLOAD_URL}</span>
+                                <span class="variable-tag" onclick="insertVariable('expiration_warning_body', '{{SHORT_URL}}')">{SHORT_URL}</span>
+                                <span class="variable-tag" onclick="insertVariable('expiration_warning_body', '{{HOURS_REMAINING}}')">{HOURS_REMAINING}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="expiration_warning_subject">Assunto</label>
+                            <input type="text" id="expiration_warning_subject" name="templates[expiration_warning][subject]" value="<?php echo htmlspecialchars($settings->get('email_template_expiration_warning_subject', 'Seus arquivos expiram em breve - {TITLE}')); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="expiration_warning_body">Corpo do Email</label>
+                            <textarea id="expiration_warning_body" name="templates[expiration_warning][body]" rows="6" required><?php echo htmlspecialchars($settings->get('email_template_expiration_warning_body', 'Olá!\n\nSeus arquivos "{TITLE}" expirarão em {HOURS_REMAINING} horas.\n\nData de expiração: {EXPIRES_AT}\n\nSe você ainda precisa destes arquivos, baixe-os antes da expiração:\n{DOWNLOAD_URL}\n\nOu use este link curto:\n{SHORT_URL}\n\nApós a expiração, os arquivos serão removidos permanentemente.\n\nObrigado por usar o {SITE_NAME}!')); ?></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-success btn-large">
+                    <i class="fas fa-save"></i> Salvar Todos os Templates
+                </button>
+            </form>
         </div>
 
-        <!-- Seção de Todos os Uploads -->
-        <div class="admin-section">
-            <h2 class="section-title">📋 Todos os Uploads do Sistema</h2>
-            
-            <?php if (!empty($allUploads)): ?>
-                <table class="uploads-table">
-                    <thead>
-                        <tr>
-                            <th>Usuário</th>
-                            <th>Título</th>
-                            <th>Arquivos</th>
-                            <th>Data de Upload</th>
-                            <th>Expira em</th>
-                            <th>Status</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($allUploads as $upload): 
-                            $files = $fileModel->getBySessionId($upload['id']);
-                            $fileCount = count($files);
-                            $expiresAt = new DateTime($upload['expires_at']);
-                            $now = new DateTime();
-                            $isExpired = $expiresAt <= $now;
-                            $isExpiringSoon = !$isExpired && $expiresAt <= (new DateTime())->add(new DateInterval('P1D'));
-                        ?>
+        <!-- Users Tab -->
+        <div class="tab-content <?php echo $activeTab === 'users' ? 'active' : ''; ?>">
+            <div class="card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3><i class="fas fa-users"></i> Gerenciar Usuários</h3>
+                    <button class="btn btn-success" onclick="showAddUserModal()">
+                        <i class="fas fa-plus"></i> Adicionar Usuário
+                    </button>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
                             <tr>
-                                <td>
-                                    <strong><?php echo htmlspecialchars($upload['username']); ?></strong>
-                                </td>
-                                <td>
-                                    <div class="upload-title">
-                                        <?php echo htmlspecialchars($upload['title'] ?: 'Sem título'); ?>
-                                    </div>
-                                    <?php if ($upload['recipient_email']): ?>
-                                        <div style="font-size: 12px; color: #666;">
-                                            Para: <?php echo htmlspecialchars($upload['recipient_email']); ?>
+                                <th>ID</th>
+                                <th>Nome de usuário</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Criado em</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($allUsers as $user): ?>
+                                <tr>
+                                    <td><?php echo $user['id']; ?></td>
+                                    <td><?php echo htmlspecialchars($user['username']); ?></td>
+                                    <td><?php echo htmlspecialchars($user['email']); ?></td>
+                                    <td><?php echo htmlspecialchars($user['role']); ?></td>
+                                    <td><?php echo date('d/m/Y H:i', strtotime($user['created_at'])); ?></td>
+                                    <td>
+                                        <div class="upload-actions">
+                                            <button class="btn" onclick="editUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>', '<?php echo htmlspecialchars($user['email']); ?>', '<?php echo $user['role']; ?>')">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <?php if ($user['id'] != $_SESSION['user_id']): ?>
+                                                <form method="POST" style="display: inline;" onsubmit="return confirm('Tem certeza que deseja deletar este usuário?')">
+                                                    <input type="hidden" name="action" value="delete_user">
+                                                    <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
+                                                    <button type="submit" class="btn btn-danger">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </form>
+                                            <?php endif; ?>
                                         </div>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <strong><?php echo $fileCount; ?></strong> arquivo<?php echo $fileCount != 1 ? 's' : ''; ?>
-                                </td>
-                                <td>
-                                    <div class="upload-date">
-                                        <?php echo date('d/m/Y H:i', strtotime($upload['created_at'])); ?>
-                                    </div>
-                                </td>
-                                <td>
-                                    <div class="upload-expires <?php echo $isExpired ? 'expired' : ($isExpiringSoon ? 'expires-soon' : ''); ?>">
-                                        <?php echo date('d/m/Y H:i', strtotime($upload['expires_at'])); ?>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="status-badge <?php echo $isExpired ? 'status-expired' : 'status-active'; ?>">
-                                        <?php echo $isExpired ? 'Expirado' : 'Ativo'; ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <form action="admin_handler.php" method="POST" style="display: inline;">
-                                        <input type="hidden" name="action" value="delete_upload">
-                                        <input type="hidden" name="upload_id" value="<?php echo $upload['id']; ?>">
-                                        <button type="submit" class="btn btn-danger" onclick="return confirm('Tem certeza que deseja excluir este upload?')">
-                                            🗑️ Excluir
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php else: ?>
-                <div class="empty-state">
-                    <div class="empty-state-icon">📭</div>
-                    <h3>Nenhum upload encontrado</h3>
-                    <p>Ainda não há uploads no sistema.</p>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
-            <?php endif; ?>
+            </div>
         </div>
 
-        <!-- Seção de Gerenciar Uploads por Usuário -->
-        <div class="admin-section">
-            <h2 class="section-title">🔍 Uploads por Usuário</h2>
-            <form method="GET" action="admin.php">
+        <!-- Uploads Tab -->
+        <div class="tab-content <?php echo $activeTab === 'uploads' ? 'active' : ''; ?>">
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-upload"></i> Todos os Uploads</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Título</th>
+                                <th>Usuário</th>
+                                <th>Arquivos</th>
+                                <th>Downloads</th>
+                                <th>Tamanho</th>
+                                <th>Criado em</th>
+                                <th>Expira em</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($allUploads as $upload): ?>
+                                <?php 
+                                $files = $fileModel->getBySessionId($upload['id']);
+                                $totalSize = $fileModel->getTotalSizeBySession($upload['id']);
+                                ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($upload['title']); ?></td>
+                                    <td><?php echo htmlspecialchars($upload['username']); ?></td>
+                                    <td><?php echo count($files); ?></td>
+                                    <td>
+                                        <span class="badge"><?php echo $upload['download_count'] ?? 0; ?></span>
+                                    </td>
+                                    <td><?php echo formatBytes($totalSize); ?></td>
+                                    <td><?php echo date('d/m/Y H:i', strtotime($upload['created_at'])); ?></td>
+                                    <td><?php echo date('d/m/Y H:i', strtotime($upload['expires_at'])); ?></td>
+                                    <td>
+                                        <div class="upload-actions">
+                                            <a href="../download/<?php echo $upload['token']; ?>" class="btn" target="_blank" title="Visualizar">
+                                                <i class="fas fa-eye"></i>
+                                            </a>
+                                            <button class="btn" onclick="changeUploadExpiration(<?php echo $upload['id']; ?>, '<?php echo $upload['expires_at']; ?>')" title="Alterar Expiração">
+                                                <i class="fas fa-clock"></i>
+                                            </button>
+                                            <button class="btn btn-danger" onclick="deleteUpload(<?php echo $upload['id']; ?>, '<?php echo htmlspecialchars($upload['title'], ENT_QUOTES); ?>')" title="Apagar Upload">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Styling Tab -->
+        <div class="tab-content <?php echo $activeTab === 'styling' ? 'active' : ''; ?>">
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-palette"></i> Configurações de Estilo</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <input type="hidden" name="action" value="update_styling">
+                        
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="primary_color">Cor Primária</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="color" id="primary_color_picker" value="<?php echo $settings->get('primary_color', '#4a7c59'); ?>" style="width: 50px; height: 40px; border: 2px solid #dee2e6; border-radius: 5px; cursor: pointer;">
+                                    <input type="text" id="primary_color" name="primary_color" value="<?php echo $settings->get('primary_color', '#4a7c59'); ?>" pattern="^#[0-9A-Fa-f]{6}$" style="flex: 1;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="secondary_color">Cor Secundária</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="color" id="secondary_color_picker" value="<?php echo $settings->get('secondary_color', '#6a9ba5'); ?>" style="width: 50px; height: 40px; border: 2px solid #dee2e6; border-radius: 5px; cursor: pointer;">
+                                    <input type="text" id="secondary_color" name="secondary_color" value="<?php echo $settings->get('secondary_color', '#6a9ba5'); ?>" pattern="^#[0-9A-Fa-f]{6}$" style="flex: 1;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="background_color">Cor de Fundo</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="color" id="background_color_picker" value="<?php echo $settings->get('background_color', '#f7fcf5'); ?>" style="width: 50px; height: 40px; border: 2px solid #dee2e6; border-radius: 5px; cursor: pointer;">
+                                    <input type="text" id="background_color" name="background_color" value="<?php echo $settings->get('background_color', '#f7fcf5'); ?>" pattern="^#[0-9A-Fa-f]{6}$" style="flex: 1;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="text_color">Cor do Texto</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="color" id="text_color_picker" value="<?php echo $settings->get('text_color', '#333333'); ?>" style="width: 50px; height: 40px; border: 2px solid #dee2e6; border-radius: 5px; cursor: pointer;">
+                                    <input type="text" id="text_color" name="text_color" value="<?php echo $settings->get('text_color', '#333333'); ?>" pattern="^#[0-9A-Fa-f]{6}$" style="flex: 1;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="success_color">Cor de Sucesso</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="color" id="success_color_picker" value="<?php echo $settings->get('success_color', '#28a745'); ?>" style="width: 50px; height: 40px; border: 2px solid #dee2e6; border-radius: 5px; cursor: pointer;">
+                                    <input type="text" id="success_color" name="success_color" value="<?php echo $settings->get('success_color', '#28a745'); ?>" pattern="^#[0-9A-Fa-f]{6}$" style="flex: 1;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="error_color">Cor de Erro</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="color" id="error_color_picker" value="<?php echo $settings->get('error_color', '#dc3545'); ?>" style="width: 50px; height: 40px; border: 2px solid #dee2e6; border-radius: 5px; cursor: pointer;">
+                                    <input type="text" id="error_color" name="error_color" value="<?php echo $settings->get('error_color', '#dc3545'); ?>" pattern="^#[0-9A-Fa-f]{6}$" style="flex: 1;">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="width: 100%; height: 60px; border-radius: 8px; margin: 20px 0; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);" id="colorPreview">
+                            Pré-visualização das Cores
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Pré-definições de Cores Harmônicas</label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-top: 15px;">
+                                <!-- Verde Natural (Atual) -->
+                                <div class="color-preset" onclick="applyColorPreset('#4a7c59', '#6a9ba5', '#f7fcf5', '#333333', '#28a745', '#dc3545')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #4a7c59 0%, #6a9ba5 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Verde Natural</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Calmo & Profissional</div>
+                                </div>
+                                
+                                <!-- Azul Oceânico -->
+                                <div class="color-preset" onclick="applyColorPreset('#2563eb', '#0ea5e9', '#f0f9ff', '#1e293b', '#10b981', '#ef4444')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Azul Oceânico</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Confiável & Moderno</div>
+                                </div>
+                                
+                                <!-- Púrpura Elegante -->
+                                <div class="color-preset" onclick="applyColorPreset('#7c3aed', '#a855f7', '#faf5ff', '#374151', '#059669', '#f87171')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Púrpura Elegante</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Criativo & Sofisticado</div>
+                                </div>
+                                
+                                <!-- Laranja Energético -->
+                                <div class="color-preset" onclick="applyColorPreset('#ea580c', '#f97316', '#fff7ed', '#292524', '#16a34a', '#dc2626')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Laranja Energético</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Vibrante & Dinâmico</div>
+                                </div>
+                                
+                                <!-- Rosa Moderno -->
+                                <div class="color-preset" onclick="applyColorPreset('#db2777', '#ec4899', '#fdf2f8', '#374151', '#059669', '#ef4444')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #db2777 0%, #ec4899 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Rosa Moderno</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Criativo & Inovador</div>
+                                </div>
+                                
+                                <!-- Cinza Executivo -->
+                                <div class="color-preset" onclick="applyColorPreset('#475569', '#64748b', '#f8fafc', '#1e293b', '#22c55e', '#ef4444')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #475569 0%, #64748b 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Cinza Executivo</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Sóbrio & Corporativo</div>
+                                </div>
+                                
+                                <!-- Turquesa Tropical -->
+                                <div class="color-preset" onclick="applyColorPreset('#0891b2', '#06b6d4', '#ecfeff', '#164e63', '#10b981', '#f43f5e')" style="cursor: pointer; padding: 15px; border-radius: 10px; background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%); color: white; text-align: center; transition: transform 0.3s ease;">
+                                    <div style="font-weight: 600; margin-bottom: 5px;">Turquesa Tropical</div>
+                                    <div style="font-size: 11px; opacity: 0.9;">Fresco & Tropical</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save"></i> Salvar Estilo
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-image"></i> Logo e Favicon do Sistema</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data">
+                        <input type="hidden" name="action" value="upload_logo">
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="logo">Logo do Sistema (PNG ou JPG, máx. 2MB)</label>
+                                <input type="file" id="logo" name="logo" accept="image/png,image/jpeg,image/jpg" style="margin-bottom: 15px;">
+                                
+                                <div style="max-width: 200px; max-height: 100px; border: 2px dashed #dee2e6; border-radius: 8px; padding: 10px; text-align: center;" id="logoPreview">
+                                    <?php 
+                                    $currentLogo = $settings->get('site_logo', 'src/img/logo.png');
+                                    if ($currentLogo && file_exists($currentLogo)): 
+                                    ?>
+                                        <img src="<?php echo htmlspecialchars($currentLogo); ?>" alt="Logo atual" style="max-width: 100%; max-height: 80px; object-fit: contain;">
+                                        <p style="margin-top: 10px; font-size: 12px; color: #666;">Logo atual</p>
+                                    <?php else: ?>
+                                        <p style="color: #666;">Nenhum logo configurado</p>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="favicon">Favicon (PNG ou ICO, máx. 1MB)</label>
+                                <input type="file" id="favicon" name="favicon" accept="image/png,image/x-icon,image/vnd.microsoft.icon" style="margin-bottom: 15px;">
+                                
+                                <div style="max-width: 100px; max-height: 100px; border: 2px dashed #dee2e6; border-radius: 8px; padding: 10px; text-align: center;" id="faviconPreview">
+                                    <?php 
+                                    $currentFavicon = $settings->get('site_favicon', 'src/img/favicon.png');
+                                    if ($currentFavicon && file_exists($currentFavicon)): 
+                                    ?>
+                                        <img src="<?php echo htmlspecialchars($currentFavicon); ?>" alt="Favicon atual" style="max-width: 32px; max-height: 32px; object-fit: contain;">
+                                        <p style="margin-top: 10px; font-size: 12px; color: #666;">Favicon atual</p>
+                                    <?php else: ?>
+                                        <p style="color: #666; font-size: 12px;">Nenhum favicon configurado</p>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save"></i> Salvar Logo e Favicon
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Edit Modal -->
+    <div id="userModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 10px; width: 400px;">
+            <h3>Editar Usuário</h3>
+            <form method="POST" id="editUserForm">
+                <input type="hidden" name="action" value="update_user">
+                <input type="hidden" name="user_id" id="editUserId">
+                
                 <div class="form-group">
-                    <label class="form-label" for="user_select">Selecionar Usuário</label>
-                    <select name="user_id" id="user_select" class="form-select" onchange="showUserUploads(this.value)">
-                        <option value="">Selecione um usuário para ver seus uploads</option>
-                        <?php foreach ($allUsers as $user): ?>
-                            <option value="<?php echo $user['id']; ?>" <?php echo ($selected_user_id == $user['id']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($user['username']); ?> (<?php echo htmlspecialchars($user['email']); ?>)
-                                <?php if ($user['role'] === 'admin'): ?> - ADMIN<?php endif; ?>
-                            </option>
-                        <?php endforeach; ?>
+                    <label for="editUsername">Nome de usuário</label>
+                    <input type="text" id="editUsername" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editEmail">Email</label>
+                    <input type="email" id="editEmail" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editRole">Role</label>
+                    <select id="editRole" name="role">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
                     </select>
                 </div>
+                
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn" onclick="closeUserModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-success">Salvar</button>
+                </div>
             </form>
         </div>
     </div>
 
-    <!-- Modal de Uploads do Usuário -->
-    <div id="userUploadsModal" class="user-uploads-modal">
-        <div class="user-uploads-content">
-            <div class="user-uploads-header">
-                <h2 class="user-uploads-title" id="modalTitle">📤 Uploads do Usuário</h2>
-                <button class="modal-close" onclick="closeUserUploadsModal()">&times;</button>
-            </div>
-            <div class="user-uploads-body" id="modalBody">
-                <!-- Conteúdo será carregado dinamicamente -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal de Alteração de Expiração -->
-    <div id="expirationModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div class="modal-icon">⏰</div>
-                <h2 class="modal-title">Alterar Data de Expiração</h2>
-            </div>
-            
-            <div class="form-row">
-                <label class="form-label">Data de expiração atual:</label>
-                <div id="currentExpiration" class="current-expiration"></div>
-            </div>
-            
-            <div class="form-row">
-                <label for="newExpiration" class="form-label">Nova data de expiração:</label>
-                <input type="datetime-local" id="newExpiration" class="form-input" required>
-                <div class="form-hint">Selecione uma data e hora no futuro</div>
-            </div>
-            
-            <div class="modal-actions">
-                <button type="button" class="modal-btn modal-btn-secondary" onclick="closeExpirationModal()">
-                    Cancelar
-                </button>
-                <button type="button" class="modal-btn modal-btn-primary" onclick="confirmExpirationChange()">
-                    Alterar Data
-                </button>
-            </div>
+    <!-- Add User Modal -->
+    <div id="addUserModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 10px; width: 400px;">
+            <h3>Adicionar Usuário</h3>
+            <form method="POST" id="addUserForm">
+                <input type="hidden" name="action" value="add_user">
+                
+                <div class="form-group">
+                    <label for="addUsername">Nome de usuário</label>
+                    <input type="text" id="addUsername" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="addEmail">Email</label>
+                    <input type="email" id="addEmail" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="addPassword">Senha</label>
+                    <input type="password" id="addPassword" name="password" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="addRole">Role</label>
+                    <select id="addRole" name="role">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn" onclick="closeAddUserModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-success">Adicionar</button>
+                </div>
+            </form>
         </div>
     </div>
 
     <script>
-        // Função para mostrar uploads do usuário
-        async function showUserUploads(userId) {
-            if (!userId || userId === '' || userId === null || userId === undefined) {
-                return;
-            }
-
-            const modal = document.getElementById('userUploadsModal');
-            const modalTitle = document.getElementById('modalTitle');
-            const modalBody = document.getElementById('modalBody');
-
-            // Buscar dados do usuário
-            try {
-                const url = `./get_user_uploads.php?user_id=${encodeURIComponent(userId)}`;
-                const response = await fetch(url);
-                const data = await response.json();
-
-                if (data.success) {
-                    modalTitle.textContent = `📤 Uploads de ${data.user.username}`;
-                    
-                    if (data.uploads.length === 0) {
-                        modalBody.innerHTML = `
-                            <div class="empty-uploads">
-                                <div class="empty-uploads-icon">📭</div>
-                                <h3>Nenhum upload encontrado</h3>
-                                <p>Este usuário ainda não fez nenhum upload.</p>
-                            </div>
-                        `;
-                    } else {
-                        let html = '';
-                        data.uploads.forEach(upload => {
-                            const isExpired = new Date(upload.expires_at) <= new Date();
-                            const statusClass = isExpired ? 'status-expired' : 'status-active';
-                            const statusText = isExpired ? 'Expirado' : 'Ativo';
-                            
-                            html += `
-                                <div class="upload-item-modal">
-                                    <div class="upload-header-modal">
-                                        <div class="upload-info-modal">
-                                            <div class="upload-title-modal">${upload.title || 'Sem título'}</div>
-                                            <div class="upload-meta-modal">📁 ${upload.file_count} arquivo(s)</div>
-                                            <div class="upload-meta-modal">📅 Criado em: ${formatDate(upload.created_at)}</div>
-                                            <div class="upload-meta-modal">⏰ Expira em: ${formatDate(upload.expires_at)}</div>
-                                            ${upload.recipient_email ? `<div class="upload-meta-modal">📧 Para: ${upload.recipient_email}</div>` : ''}
-                                            <div class="upload-status-modal">
-                                                <span class="status-badge ${statusClass}">${statusText}</span>
-                                            </div>
-                                        </div>
-                                        <div class="upload-actions-modal">
-                                            <button class="btn-modal btn-copy" onclick="copyLink('${upload.short_code || upload.token}', ${upload.short_code ? 'true' : 'false'})">
-                                                📋 Copiar Link
-                                            </button>
-                                            <button class="btn-modal btn-expiry" onclick="changeUploadExpiration(${upload.id}, '${upload.expires_at}')">
-                                                ⏰ Alterar Exp.
-                                            </button>
-                                            <a href="download?token=${upload.token}" target="_blank" class="btn-modal btn-view">
-                                                👁️ Ver
-                                            </a>
-                                            <button class="btn-modal btn-delete-modal" onclick="deleteUploadFromModal(${upload.id}, '${upload.title || 'upload'}')">
-                                                🗑️ Excluir
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                        modalBody.innerHTML = html;
-                    }
-
-                    // Mostrar modal
-                    modal.classList.add('show');
-                } else {
-                    alert('Erro ao carregar uploads: ' + data.message);
-                }
-            } catch (error) {
-                console.error('Erro:', error);
-                alert('Erro ao carregar uploads do usuário');
-            }
-        }
-
-        // Função para fechar o modal
-        function closeUserUploadsModal() {
-            const modal = document.getElementById('userUploadsModal');
-            modal.classList.remove('show');
-        }
-
-        // Função para copiar link
-        async function copyLink(token, isShort) {
-            const baseUrl = window.location.origin;
-            const link = isShort === 'true' ? `${baseUrl}/s/${token}` : `${baseUrl}/download/${token}`;
+        function insertVariable(textareaId, variable) {
+            const textarea = document.getElementById(textareaId);
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value;
             
-            try {
-                await navigator.clipboard.writeText(link);
-                showToast('Link copiado para a área de transferência!', 'success');
-            } catch (err) {
-                // Fallback para navegadores mais antigos
-                const textArea = document.createElement('textarea');
-                textArea.value = link;
-                document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
-                showToast('Link copiado para a área de transferência!', 'success');
-            }
+            textarea.value = text.substring(0, start) + variable + text.substring(end);
+            textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+            textarea.focus();
         }
 
-        // Variável global para armazenar o ID do upload atual
-        let currentUploadId = null;
+        function editUser(id, username, email, role) {
+            document.getElementById('editUserId').value = id;
+            document.getElementById('editUsername').value = username;
+            document.getElementById('editEmail').value = email;
+            document.getElementById('editRole').value = role;
+            document.getElementById('userModal').style.display = 'block';
+        }
 
-        // Função para alterar expiração do upload - usando modal do dashboard
+        function closeUserModal() {
+            document.getElementById('userModal').style.display = 'none';
+        }
+
+        function showAddUserModal() {
+            document.getElementById('addUserModal').style.display = 'block';
+        }
+
+        function closeAddUserModal() {
+            document.getElementById('addUserModal').style.display = 'none';
+            document.getElementById('addUserForm').reset();
+        }
+
         function changeUploadExpiration(uploadId, currentExpiration) {
-            currentUploadId = uploadId;
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.5); z-index: 1000; display: flex;
+                align-items: center; justify-content: center;
+            `;
             
-            // Convert current date to datetime-local input format
             const currentDate = new Date(currentExpiration);
             const formattedDate = currentDate.toISOString().slice(0, 16);
             
-            // Format current date for display
-            const displayDate = currentDate.toLocaleString('pt-BR', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-            
-            // Fill modal
-            document.getElementById('currentExpiration').textContent = displayDate;
-            document.getElementById('newExpiration').value = formattedDate;
-            
-            // Show modal
-            const modal = document.getElementById('expirationModal');
-            modal.classList.add('show');
-            
-            // Focus on input
-            setTimeout(() => {
-                document.getElementById('newExpiration').focus();
-            }, 300);
-        }
-
-        // Função para fechar modal de expiração
-        function closeExpirationModal() {
-            const modal = document.getElementById('expirationModal');
-            modal.classList.remove('show');
-            currentUploadId = null;
-        }
-
-        // Função para confirmar alteração de expiração
-        async function confirmExpirationChange() {
-            const newExpiration = document.getElementById('newExpiration').value;
-            if (!newExpiration || !currentUploadId) {
-                showToast('Dados inválidos para alteração', 'error');
-                return;
-            }
-
-            try {
-                const response = await fetch('./update_expiration.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        upload_id: currentUploadId,
-                        expires_at: newExpiration
-                    })
-                });
-
-                const data = await response.json();
-                
-                if (data.success) {
-                    showToast('Data de expiração alterada com sucesso!', 'success');
-                    closeExpirationModal();
-                    // Recarregar dados do modal
-                    const select = document.getElementById('user_select');
-                    showUserUploads(select.value);
-                } else {
-                    showToast('Erro ao alterar data: ' + data.message, 'error');
-                }
-            } catch (error) {
-                console.error('Erro:', error);
-                showToast('Erro ao alterar data de expiração', 'error');
-            }
-        }
-
-        // Função para excluir upload do modal - usando modal de confirmação do dashboard
-        function deleteUploadFromModal(uploadId, uploadTitle) {
-            showConfirmModal(
-                'Confirmar Exclusão',
-                `Tem certeza que deseja excluir o upload "${uploadTitle}"? Esta ação não pode ser desfeita.`,
-                'Excluir',
-                'Cancelar',
-                async () => {
-                    try {
-                        const response = await fetch('./admin_handler.php', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: `action=delete_upload&upload_id=${uploadId}`
-                        });
-
-                        if (response.ok) {
-                            showToast('Upload excluído com sucesso!', 'success');
-                            // Recarregar dados do modal
-                            const select = document.getElementById('user_select');
-                            showUserUploads(select.value);
-                        } else {
-                            showToast('Erro ao excluir upload', 'error');
-                        }
-                    } catch (error) {
-                        console.error('Erro:', error);
-                        showToast('Erro ao excluir upload', 'error');
-                    }
-                }
-            );
-        }
-
-        // Função para formatar data
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleString('pt-BR', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        }
-
-        // Sistema de modal de confirmação do dashboard
-        function showConfirmModal(title, message, confirmText = 'Confirmar', cancelText = 'Cancelar', onConfirm = null) {
-            // Remove existing modal if any
-            const existingModal = document.querySelector('.confirm-modal');
-            if (existingModal) {
-                existingModal.remove();
-            }
-
-            const modal = document.createElement('div');
-            modal.className = 'confirm-modal';
             modal.innerHTML = `
-                <div class="confirm-content">
-                    <div class="confirm-header">
-                        <div class="confirm-icon">⚠️</div>
-                        <h3 class="confirm-title">${title}</h3>
-                    </div>
-                    <div class="confirm-message">${message}</div>
-                    <div class="confirm-actions">
-                        <button class="confirm-btn confirm-btn-cancel" onclick="closeConfirmModal()">${cancelText}</button>
-                        <button class="confirm-btn confirm-btn-danger" onclick="confirmAction()">${confirmText}</button>
-                    </div>
+                <div style="background: white; padding: 30px; border-radius: 15px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+                    <h3 style="margin-bottom: 20px; color: var(--text-color);">
+                        <i class="fas fa-clock"></i> Alterar Expiração
+                    </h3>
+                    <form id="adminExpirationForm">
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-color);">
+                                Nova Data e Hora de Expiração
+                            </label>
+                            <input type="datetime-local" id="adminNewExpiration" value="${formattedDate}" 
+                                   style="width: 100%; padding: 12px; border: 2px solid #dee2e6; border-radius: 8px; font-size: 14px;"
+                                   min="${new Date().toISOString().slice(0, 16)}">
+                        </div>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button type="button" onclick="closeAdminModal()" 
+                                    style="padding: 12px 20px; background: #6c757d; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                Cancelar
+                            </button>
+                            <button type="submit" 
+                                    style="padding: 12px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                <i class="fas fa-save"></i> Salvar
+                            </button>
+                        </div>
+                    </form>
                 </div>
             `;
-
+            
             document.body.appendChild(modal);
             
-            // Store the callback function
-            modal._onConfirm = onConfirm;
-            
-            // Show modal with animation
-            setTimeout(() => {
-                modal.classList.add('show');
-                // Focus on the confirm button for better accessibility
-                const confirmBtn = modal.querySelector('.confirm-btn-danger');
-                if (confirmBtn) {
-                    confirmBtn.focus();
-                }
-            }, 50);
-            
-            // Close on background click
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    closeConfirmModal();
-                }
-            });
-            
-            // Keyboard support
-            const handleKeyDown = (e) => {
-                if (e.key === 'Escape') {
-                    closeConfirmModal();
-                } else if (e.key === 'Enter') {
-                    confirmAction();
-                }
+            window.closeAdminModal = function() {
+                document.body.removeChild(modal);
+                delete window.closeAdminModal;
             };
             
-            document.addEventListener('keydown', handleKeyDown);
-            modal._keyHandler = handleKeyDown;
-        }
-
-        function closeConfirmModal() {
-            const modal = document.querySelector('.confirm-modal');
-            if (modal) {
-                // Remove keyboard event listener
-                if (modal._keyHandler) {
-                    document.removeEventListener('keydown', modal._keyHandler);
-                }
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) closeAdminModal();
+            });
+            
+            document.getElementById('adminExpirationForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const newExpiration = document.getElementById('adminNewExpiration').value;
                 
-                modal.classList.remove('show');
-                setTimeout(() => {
-                    if (modal.parentNode) {
-                        modal.parentNode.removeChild(modal);
+                const formData = new FormData();
+                formData.append('action', 'update_expiration');
+                formData.append('upload_id', uploadId);
+                formData.append('new_expiration', newExpiration);
+                
+                fetch('/admin', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (response.ok) {
+                        alert('Expiração atualizada com sucesso!');
+                        closeAdminModal();
+                        window.location.reload();
+                    } else {
+                        throw new Error('Erro na resposta do servidor');
                     }
-                }, 300);
-            }
+                })
+                .catch(error => {
+                    console.error('Erro ao atualizar expiração:', error);
+                    alert('Erro ao atualizar expiração: ' + error.message);
+                    closeAdminModal();
+                });
+            });
         }
 
-        function confirmAction() {
-            const modal = document.querySelector('.confirm-modal');
-            if (modal && modal._onConfirm) {
-                modal._onConfirm();
-            }
-            closeConfirmModal();
-        }
-
-        // Função para mostrar toast (reutilizada do dashboard)
-        function showToast(message, type = 'info', duration = 3000) {
-            const toast = document.createElement('div');
-            toast.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
-                color: white;
-                padding: 12px 20px;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                z-index: 10000;
-                font-weight: 600;
-                transform: translateX(100%);
-                transition: transform 0.3s ease;
-            `;
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            setTimeout(() => toast.style.transform = 'translateX(0)', 100);
-            setTimeout(() => {
-                toast.style.transform = 'translateX(100%)';
-                setTimeout(() => document.body.removeChild(toast), 300);
-            }, duration);
-        }
-
-        // Fechar modais ao clicar fora e suporte ao teclado
-        document.addEventListener('click', function(event) {
-            const userModal = document.getElementById('userUploadsModal');
-            const expirationModal = document.getElementById('expirationModal');
-            
-            if (event.target === userModal) {
-                closeUserUploadsModal();
-            }
-            if (event.target === expirationModal) {
-                closeExpirationModal();
-            }
-        });
-
-        // Suporte ao teclado para todos os modais
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-                const userModal = document.getElementById('userUploadsModal');
-                const expirationModal = document.getElementById('expirationModal');
+        function deleteUpload(uploadId, title) {
+            if (confirm(`Tem certeza que deseja apagar o upload "${title}"? Esta ação não pode ser desfeita.`)) {
+                const formData = new FormData();
+                formData.append('action', 'delete_upload');
+                formData.append('upload_id', uploadId);
                 
-                if (userModal.classList.contains('show')) {
-                    closeUserUploadsModal();
-                }
-                if (expirationModal.classList.contains('show')) {
-                    closeExpirationModal();
-                }
-            }
-        });
-
-        function editUser(id, username, email, role) {
-            const newUsername = prompt('Nome do usuário:', username);
-            if (newUsername === null || newUsername.trim() === '') return;
-
-            const newEmail = prompt('Email do usuário:', email);
-            if (newEmail === null || newEmail.trim() === '') return;
-
-            const newRole = prompt('Função do usuário (user/admin):', role);
-            if (newRole === null || (newRole !== 'user' && newRole !== 'admin')) {
-                alert('Função deve ser "user" ou "admin"');
-                return;
-            }
-
-            if (confirm(`Confirma a edição do usuário ${username}?`)) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = 'admin_handler.php';
-
-                const fields = {
-                    action: 'edit_user',
-                    user_id: id,
-                    username: newUsername.trim(),
-                    email: newEmail.trim(),
-                    role: newRole
-                };
-
-                for (const [key, value] of Object.entries(fields)) {
-                    const input = document.createElement('input');
-                    input.type = 'hidden';
-                    input.name = key;
-                    input.value = value;
-                    form.appendChild(input);
-                }
-
-                document.body.appendChild(form);
-                form.submit();
+                fetch('/admin', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (response.ok) {
+                        alert('Upload deletado com sucesso!');
+                        window.location.reload();
+                    } else {
+                        throw new Error('Erro na resposta do servidor');
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao deletar upload:', error);
+                    alert('Erro ao deletar upload: ' + error.message);
+                });
             }
         }
 
-        function deleteUser(id, username) {
-            if (confirm(`Tem certeza que deseja excluir o usuário "${username}"? Esta ação não pode ser desfeita.`)) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = 'admin_handler.php';
-
-                const actionInput = document.createElement('input');
-                actionInput.type = 'hidden';
-                actionInput.name = 'action';
-                actionInput.value = 'delete_user';
-                form.appendChild(actionInput);
-
-                const idInput = document.createElement('input');
-                idInput.type = 'hidden';
-                idInput.name = 'user_id';
-                idInput.value = id;
-                form.appendChild(idInput);
-
-                document.body.appendChild(form);
-                form.submit();
+        // Close modal when clicking outside
+        document.getElementById('userModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeUserModal();
             }
+        });
+
+        document.getElementById('addUserModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAddUserModal();
+            }
+        });
+        
+        // Color picker synchronization
+        function setupColorPicker(pickerId, textId) {
+            const picker = document.getElementById(pickerId);
+            const text = document.getElementById(textId);
+            
+            if (picker && text) {
+                picker.addEventListener('change', function() {
+                    text.value = this.value;
+                    updateColorPreview();
+                });
+                
+                text.addEventListener('input', function() {
+                    if (this.value.match(/^#[0-9A-Fa-f]{6}$/)) {
+                        picker.value = this.value;
+                        updateColorPreview();
+                    }
+                });
+            }
+        }
+        
+        // Setup all color pickers
+        document.addEventListener('DOMContentLoaded', function() {
+            setupColorPicker('primary_color_picker', 'primary_color');
+            setupColorPicker('secondary_color_picker', 'secondary_color');
+            setupColorPicker('background_color_picker', 'background_color');
+            setupColorPicker('text_color_picker', 'text_color');
+            setupColorPicker('success_color_picker', 'success_color');
+            setupColorPicker('error_color_picker', 'error_color');
+            
+            // Initial color preview update
+            updateColorPreview();
+            
+            // File input preview
+            const logoInput = document.getElementById('logo');
+            if (logoInput) {
+                logoInput.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const preview = document.getElementById('logoPreview');
+                            preview.innerHTML = `
+                                <img src="${e.target.result}" alt="Pré-visualização do logo" style="max-width: 100%; max-height: 80px; object-fit: contain;">
+                                <p style="margin-top: 10px; font-size: 12px; color: #666;">Pré-visualização</p>
+                            `;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+            }
+            
+            // Favicon input preview
+            const faviconInput = document.getElementById('favicon');
+            if (faviconInput) {
+                faviconInput.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const preview = document.getElementById('faviconPreview');
+                            preview.innerHTML = `
+                                <img src="${e.target.result}" alt="Pré-visualização do favicon" style="max-width: 32px; max-height: 32px; object-fit: contain;">
+                                <p style="margin-top: 10px; font-size: 12px; color: #666;">Pré-visualização</p>
+                            `;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+            }
+        });
+        
+        // Update color preview
+        function updateColorPreview() {
+            const preview = document.getElementById('colorPreview');
+            const primaryColorInput = document.getElementById('primary_color');
+            const secondaryColorInput = document.getElementById('secondary_color');
+            
+            if (preview && primaryColorInput && secondaryColorInput) {
+                const primaryColor = primaryColorInput.value;
+                const secondaryColor = secondaryColorInput.value;
+                
+                preview.style.background = `linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%)`;
+            }
+        }
+        
+        // Apply color preset
+        function applyColorPreset(primary, secondary, background, text, success, error) {
+            // Update color pickers
+            document.getElementById('primary_color').value = primary;
+            document.getElementById('primary_color_picker').value = primary;
+            
+            document.getElementById('secondary_color').value = secondary;
+            document.getElementById('secondary_color_picker').value = secondary;
+            
+            document.getElementById('background_color').value = background;
+            document.getElementById('background_color_picker').value = background;
+            
+            document.getElementById('text_color').value = text;
+            document.getElementById('text_color_picker').value = text;
+            
+            document.getElementById('success_color').value = success;
+            document.getElementById('success_color_picker').value = success;
+            
+            document.getElementById('error_color').value = error;
+            document.getElementById('error_color_picker').value = error;
+            
+            // Update preview
+            updateColorPreview();
+            
+            // Add visual feedback with ripple effect
+            const clickedPreset = event.target.closest('.color-preset');
+            
+            // Reset all presets
+            document.querySelectorAll('.color-preset').forEach(preset => {
+                preset.style.transform = 'scale(1)';
+                preset.style.boxShadow = '';
+            });
+            
+            // Highlight selected preset
+            clickedPreset.style.transform = 'scale(1.08)';
+            clickedPreset.style.boxShadow = '0 12px 30px rgba(0,0,0,0.3)';
+            
+            // Reset after animation
+            setTimeout(() => {
+                clickedPreset.style.transform = 'scale(1)';
+                clickedPreset.style.boxShadow = '';
+            }, 300);
+            
+            // Show success message
+            const preview = document.getElementById('colorPreview');
+            const originalText = preview.textContent;
+            preview.textContent = '✓ Cores aplicadas com sucesso!';
+            preview.style.background = `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)`;
+            
+            setTimeout(() => {
+                preview.textContent = originalText;
+            }, 2000);
         }
     </script>
 </body>

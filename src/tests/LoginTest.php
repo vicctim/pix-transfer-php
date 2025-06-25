@@ -49,7 +49,7 @@ class LoginTest extends TestSuite {
         $result = $this->user->authenticate('admin', 'password');
         $this->assertTrue($result, 'Autenticação válida deveria retornar true');
         $this->assertEquals('admin', $this->user->username, 'Username deveria ser admin');
-        $this->assertEquals('victor@pixfilmes.com', $this->user->email, 'Email deveria ser victor@pixfilmes.com');
+        $this->assertEquals('admin@transfer.com', $this->user->email, 'Email deveria ser victor@pixfilmes.com');
         return true;
     }
 
@@ -78,7 +78,7 @@ class LoginTest extends TestSuite {
     }
 
     private function testLoginByEmail() {
-        $result = $this->user->authenticate('victor@pixfilmes.com', 'password');
+        $result = $this->user->authenticate('admin@transfer.com', 'password');
         $this->assertTrue($result, 'Login por email deveria funcionar');
         $this->assertEquals('admin', $this->user->username, 'Username deveria ser admin');
         return true;
@@ -91,7 +91,7 @@ class LoginTest extends TestSuite {
         
         $this->assertNotEmpty($userData, 'Dados do usuário não deveriam estar vazios');
         $this->assertEquals('admin', $userData['username'], 'Username deveria ser admin');
-        $this->assertEquals('victor@pixfilmes.com', $userData['email'], 'Email deveria ser victor@pixfilmes.com');
+        $this->assertEquals('admin@transfer.com', $userData['email'], 'Email deveria ser victor@pixfilmes.com');
         return true;
     }
 }

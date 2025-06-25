@@ -1,9 +1,22 @@
 <?php
 session_start();
 
+require_once 'models/SystemSettings.php';
+
+$settings = new SystemSettings();
+
+// Check if setup is complete
+if (!$settings->isSetupComplete()) {
+    header('Location: setup.php');
+    exit();
+}
+
+// Set timezone
+date_default_timezone_set($settings->getTimezone());
+
 // Se já estiver logado, redireciona para dashboard
 if (isset($_SESSION['user_id'])) {
-    header('Location: dashboard.php');
+    header('Location: ../dashboard');
     exit();
 }
 
@@ -24,25 +37,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user_id'] = $user->id;
             $_SESSION['username'] = $user->username;
             $_SESSION['email'] = $user->email;
-            header('Location: dashboard.php');
+            $_SESSION['role'] = $user->role;
+            header('Location: ../dashboard');
             exit();
         } else {
             $error = 'Usuário ou senha incorretos';
         }
     } else {
-        $error = 'Por favor, preencha todos os campos';
+        $error = 'Preencha todos os campos';
     }
 }
+
+$siteName = $settings->get('site_name', 'Pix Transfer');
+$siteLogo = $settings->get('site_logo', 'src/img/logo.png');
 ?>
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload System - Login</title>
-    <link rel="icon" type="image/png" href="src/img/favicon.png">
+    <title><?php echo htmlspecialchars($siteName); ?> - Login</title>
+    <link rel="icon" type="image/png" href="<?php echo htmlspecialchars($settings->get('site_favicon', 'src/img/favicon.png')); ?>">
     <style>
         @import url('https://fonts.googleapis.com/css?family=Titillium+Web:400,600,700');
+        
+        :root {
+            --primary-color: <?php echo $settings->get('primary_color', '#4a7c59'); ?>;
+            --secondary-color: <?php echo $settings->get('secondary_color', '#6a9ba5'); ?>;
+            --background-color: <?php echo $settings->get('background_color', '#f7fcf5'); ?>;
+            --text-color: <?php echo $settings->get('text_color', '#333333'); ?>;
+            --success-color: <?php echo $settings->get('success_color', '#28a745'); ?>;
+            --error-color: <?php echo $settings->get('error_color', '#dc3545'); ?>;
+        }
+        
         * {
             margin: 0;
             padding: 0;
@@ -50,107 +78,193 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         body {
             font-family: 'Titillium Web', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #f7fcf5;
-            color: #333;
+            background: var(--background-color);
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
+            color: var(--text-color);
             padding: 20px;
         }
-        .header {
+        
+        .logo-container {
             text-align: center;
             margin-bottom: 30px;
         }
+        
         .logo {
-            height: 120px;
-            width: auto;
-            margin: 0 auto 30px;
-            display: block;
+            max-width: 120px;
+            height: auto;
+            margin-bottom: 20px;
         }
-        .header h1 {
-            font-size: 2rem;
-            margin-bottom: 5px;
+        
+        .site-name {
+            color: var(--text-color);
+            font-size: 2.5em;
+            font-weight: 700;
         }
-        .header h1 span {
-            color: #7cb342;
-        }
-        .header p {
-            color: #757575;
-            font-size: 1.1rem;
-        }
+        
         .login-container {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            border-radius: 15px;
+            border: 1px solid #e0e0e0;
             padding: 40px;
             width: 100%;
-            max-width: 420px;
+            max-width: 400px;
         }
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .login-header h2 {
+            color: #495057;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .login-header p {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        
         .form-group {
             margin-bottom: 20px;
-            text-align: left;
         }
-        label {
+        
+        .form-group label {
             display: block;
             margin-bottom: 8px;
-            font-weight: 500;
-        }
-        input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-family: 'Titillium Web', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .btn {
-            width: 100%;
-            padding: 15px;
-            background: #7cb342;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
+            color: #495057;
             font-weight: 600;
-            cursor: pointer;
-            margin-top: 10px;
         }
-        .error {
-            background: #fee;
-            color: #c33;
-            padding: 12px;
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.1);
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px 15px;
             border-radius: 8px;
             margin-bottom: 20px;
-            font-size: 0.9rem;
-            border: 1px solid #fcc;
+            border: 1px solid #f5c6cb;
+            font-size: 14px;
+        }
+        
+        .login-button {
+            width: 100%;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        
+        .login-button:hover {
+            opacity: 0.9;
+        }
+        
+        
+        @media (max-width: 768px) {
+            .login-container {
+                padding: 30px 20px;
+            }
+            
+            .site-name {
+                font-size: 2em;
+            }
         }
     </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <div class="header">
-        <img src="src/img/logo.png" alt="Logo" class="logo">
-        <h1>Compartilhamento de arquivos <span>Pix Filmes</span></h1>
-        <p>Faça login para começar a enviar arquivos</p>
+    <div class="logo-container">
+        <?php if ($siteLogo && file_exists($siteLogo)): ?>
+            <img src="<?php echo htmlspecialchars($siteLogo); ?>" alt="<?php echo htmlspecialchars($siteName); ?>" class="logo">
+        <?php endif; ?>
+        <h1 class="site-name"><?php echo htmlspecialchars($siteName); ?></h1>
     </div>
 
     <div class="login-container">
+        <div class="login-header">
+            <h2>Acesso ao Sistema</h2>
+            <p>Faça login para compartilhar seus arquivos</p>
+        </div>
+
         <?php if ($error): ?>
-            <div class="error"><?php echo htmlspecialchars($error); ?></div>
+            <div class="error-message">
+                <i class="fas fa-exclamation-circle"></i>
+                <?php echo htmlspecialchars($error); ?>
+            </div>
         <?php endif; ?>
-        
-        <form method="POST" action="">
+
+        <form method="POST">
             <div class="form-group">
-                <label for="username">Email</label>
-                <input type="text" id="username" name="username" required value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
+                <label for="username">
+                    <i class="fas fa-user"></i>
+                    Usuário ou Email
+                </label>
+                <input type="text" id="username" name="username" required>
             </div>
+
             <div class="form-group">
-                <label for="password">Senha</label>
-                <input type="password" id="password" name="password" required value="">
+                <label for="password">
+                    <i class="fas fa-lock"></i>
+                    Senha
+                </label>
+                <input type="password" id="password" name="password" required>
             </div>
-            <button type="submit" class="btn">Entrar</button>
+
+            <button type="submit" class="login-button">
+                <i class="fas fa-sign-in-alt"></i>
+                Entrar
+            </button>
         </form>
     </div>
+
+    <script>
+        // Auto-focus no primeiro campo
+        document.getElementById('username').focus();
+        
+        // Enter key navigation
+        document.getElementById('username').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('password').focus();
+            }
+        });
+    </script>
 </body>
-</html> 
+</html>
+
+<?php
+function formatBytes($bytes, $precision = 2) {
+    $units = array('B', 'KB', 'MB', 'GB', 'TB');
+    
+    for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
+        $bytes /= 1024;
+    }
+    
+    return round($bytes, $precision) . ' ' . $units[$i];
+}
+?>

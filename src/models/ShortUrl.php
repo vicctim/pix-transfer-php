@@ -124,6 +124,13 @@ class ShortUrl {
     }
 
     /**
+     * Busca código curto por token
+     */
+    public function getShortCodeByToken($token) {
+        return $this->getByOriginalToken($token);
+    }
+
+    /**
      * Registra acesso a uma URL curta
      */
     public function logAccess($short_code, $ip_address, $user_agent = '') {

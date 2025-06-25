@@ -17,7 +17,7 @@ if (!file_exists('tests/TestSuite.php')) {
 // Verificar se o banco está acessível
 try {
     require_once 'config/database.php';
-    $database = new Database();
+    $database = Database::getInstance();
     $conn = $database->getConnection();
     if (!$conn) {
         echo "❌ ERRO: Não foi possível conectar ao banco de dados\n";

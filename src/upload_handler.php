@@ -22,7 +22,9 @@ try {
     require_once 'models/UploadSession.php';
     require_once 'models/File.php';
     require_once 'models/User.php';
-    require_once 'config/email_phpmailer.php';
+    require_once 'models/SystemSettings.php';
+    require_once 'models/EmailTemplate.php';
+    require_once 'models/ShortUrl.php';
 } catch (Exception $e) {
     ob_end_clean();
     http_response_code(500);
@@ -30,6 +32,11 @@ try {
     echo json_encode(['success' => false, 'message' => 'Erro interno do servidor']);
     exit();
 }
+
+$settings = new SystemSettings();
+
+// Set timezone
+date_default_timezone_set($settings->getTimezone());
 
 // Definir headers
 header('Content-Type: application/json');
@@ -48,167 +55,211 @@ try {
 
     // Coletar dados do formulário
     $title = !empty($_POST['title']) ? $_POST['title'] : $_FILES['files']['name'][0];
-    $expires_in = (int)($_POST['expires_in'] ?? 7);
-    $transfer_mode = $_POST['transfer_mode'] ?? 'link';
-    $recipient_email = ($transfer_mode === 'email') ? ($_POST['email_to'] ?? null) : null;
-
-    if ($transfer_mode === 'email' && !filter_var($recipient_email, FILTER_VALIDATE_EMAIL)) {
-        throw new Exception('Email do destinatário é inválido.');
+    $recipient_email = $_POST['recipient_email'] ?? '';
+    $expires_in = (int)($_POST['expires_in'] ?? $settings->get('default_expiration_days', 7));
+    $custom_message = $_POST['custom_message'] ?? '';
+    $notify_sender = isset($_POST['notify_sender']) && $_POST['notify_sender'] === '1';
+    
+    // Additional email recipients
+    $additional_emails = [];
+    if (!empty($_POST['additional_emails'])) {
+        $additional_emails = array_filter(array_map('trim', explode(',', $_POST['additional_emails'])));
+        // Validate emails
+        foreach ($additional_emails as $email) {
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                throw new Exception("Email inválido: $email");
+            }
+        }
     }
 
     // Criar sessão de upload
     $uploadSession = new UploadSession();
-    $session_id = $uploadSession->create(
-        $_SESSION['user_id'], 
-        $title, 
-        $recipient_email,
-        $expires_in
-    );
+    $session_id = $uploadSession->create($_SESSION['user_id'], $title, $recipient_email, $expires_in);
     
     if (!$session_id) {
         throw new Exception('Erro ao criar sessão de upload');
     }
-    
-    // Obter informações da sessão, incluindo o token gerado
-    $uploadSession->getById($session_id);
-    if (!$uploadSession->token) {
-        throw new Exception('Sessão de upload não encontrada após a criação');
+
+    // Atualizar notify_sender se especificado
+    if ($notify_sender) {
+        $db = Database::getInstance();
+        $db->query("UPDATE upload_sessions SET notify_sender = 1 WHERE id = ?", [$session_id]);
     }
-    $session_token = $uploadSession->token;
+
+    // Criar diretório de upload baseado na data (GMT-3)
+    $upload_date = date('Y/m/d');
+    $upload_dir = "uploads/$upload_date";
+    
+    if (!is_dir($upload_dir)) {
+        if (!mkdir($upload_dir, 0755, true)) {
+            throw new Exception('Erro ao criar diretório de upload');
+        }
+    }
 
     $fileModel = new File();
     $uploaded_files = [];
     $total_size = 0;
-    $errors = [];
 
     // Processar cada arquivo
-    foreach ($_FILES['files']['tmp_name'] as $key => $tmp_name) {
-        if ($_FILES['files']['error'][$key] !== UPLOAD_ERR_OK) {
-            $errors[] = "Erro no upload do arquivo: " . $_FILES['files']['name'][$key];
-            continue;
+    $file_count = count($_FILES['files']['name']);
+    for ($i = 0; $i < $file_count; $i++) {
+        // Verificar se houve erro no upload
+        if ($_FILES['files']['error'][$i] !== UPLOAD_ERR_OK) {
+            throw new Exception('Erro no upload do arquivo: ' . $_FILES['files']['name'][$i]);
         }
 
-        $original_name = $_FILES['files']['name'][$key];
-        $file_size = $_FILES['files']['size'][$key];
-        $mime_type = $_FILES['files']['type'][$key];
+        $original_name = $_FILES['files']['name'][$i];
+        $tmp_name = $_FILES['files']['tmp_name'][$i];
+        $file_size = $_FILES['files']['size'][$i];
+        $mime_type = $_FILES['files']['type'][$i] ?: 'application/octet-stream';
 
-        // Validar tamanho do arquivo (10GB)
-        if ($file_size > 10 * 1024 * 1024 * 1024) {
-            $errors[] = "Arquivo muito grande: " . $original_name;
-            continue;
+        // Verificar tamanho máximo
+        $max_size = $settings->get('max_file_size', 10737418240); // 10GB default
+        if ($file_size > $max_size) {
+            throw new Exception("Arquivo '$original_name' é muito grande. Máximo permitido: " . formatBytes($max_size));
         }
 
         // Gerar nome único para o arquivo
-        $extension = pathinfo($original_name, PATHINFO_EXTENSION);
-        $stored_name = uniqid() . '_' . time() . '.' . $extension;
-        
-        // Criar diretório se não existir
-        $upload_dir = 'uploads/' . date('Y/m/d');
-        if (!is_dir($upload_dir)) {
-            if (!mkdir($upload_dir, 0755, true)) {
-                $errors[] = "Erro ao criar diretório: " . $original_name;
-                continue;
-            }
-        }
-
+        $file_extension = pathinfo($original_name, PATHINFO_EXTENSION);
+        $stored_name = uniqid() . '_' . time() . '.' . $file_extension;
         $file_path = $upload_dir . '/' . $stored_name;
 
-        // Mover arquivo
-        if (move_uploaded_file($tmp_name, $file_path)) {
-            // Salvar no banco de dados
-            if ($fileModel->create($session_id, $original_name, $stored_name, $file_path, $file_size, $mime_type)) {
-                $uploaded_files[] = [
-                    'name' => $original_name,
-                    'size' => $file_size,
-                    'path' => $file_path
-                ];
-                $total_size += $file_size;
-            } else {
-                $errors[] = "Erro ao salvar arquivo no banco: " . $original_name;
-                if (file_exists($file_path)) {
-                    unlink($file_path);
-                }
-            }
-        } else {
-            $errors[] = "Erro ao mover arquivo: " . $original_name;
-        }
-    }
-
-    if (empty($uploaded_files)) {
-        // Se nenhum arquivo foi enviado com sucesso, deletar a sessão
-        $uploadSession->delete($session_id);
-        throw new Exception('Nenhum arquivo foi enviado com sucesso');
-    }
-
-    // Enviar emails
-    try {
-        error_log("=== INICIANDO ENVIO DE EMAILS ===");
-        $emailService = new PHPMailerEmailService();
-        $user = new User();
-        $userData = $user->getById($_SESSION['user_id']);
-        
-        error_log("User data retrieved: " . json_encode($userData));
-        error_log("Transfer mode: " . $transfer_mode);
-        error_log("Recipient email: " . $recipient_email);
-        
-        // Se o modo for email, envia para o destinatário
-        if ($transfer_mode === 'email' && $recipient_email) {
-            error_log("Sending email to recipient: " . $recipient_email);
-            $recipientResult = $emailService->sendDownloadLinkToRecipient(
-                $recipient_email,
-                $userData['email'], // Email do remetente
-                $title,
-                $session_token,
-                $uploadSession->expires_at,
-                count($uploaded_files),
-                $total_size
-            );
-            error_log("Recipient email result: " . ($recipientResult ? 'SUCCESS' : 'FAILED'));
+        // Mover arquivo para destino final
+        if (!move_uploaded_file($tmp_name, $file_path)) {
+            throw new Exception("Erro ao salvar arquivo: $original_name");
         }
 
-        // Email de confirmação para o próprio usuário e notificação para o Admin
-        error_log("Sending upload complete email to: " . $userData['email']);
-        $uploadResult = $emailService->sendUploadCompleteEmail(
-            $userData['email'],
-            $title,
-            $session_token,
-            $uploadSession->expires_at,
-            count($uploaded_files),
-            $total_size
+        // Salvar informações no banco
+        $file_id = $fileModel->create(
+            $session_id,
+            $original_name,
+            $stored_name,
+            $file_path,
+            $file_size,
+            $mime_type
         );
-        error_log("Upload complete email result: " . ($uploadResult ? 'SUCCESS' : 'FAILED'));
-        error_log("=== FIM DO ENVIO DE EMAILS ===");
 
-    } catch (Exception $emailError) {
-        // Log do erro de email mas não falhar o upload
-        error_log("Email error: " . $emailError->getMessage());
-        error_log("Email error trace: " . $emailError->getTraceAsString());
+        if (!$file_id) {
+            // Remover arquivo se falhou ao salvar no banco
+            unlink($file_path);
+            throw new Exception("Erro ao registrar arquivo no banco: $original_name");
+        }
+
+        $uploaded_files[] = [
+            'id' => $file_id,
+            'name' => $original_name,
+            'size' => $file_size,
+            'type' => $mime_type
+        ];
+
+        $total_size += $file_size;
     }
 
-    // Limpar qualquer output anterior
+    // Obter dados da sessão criada
+    $uploadSession->getById($session_id);
+    $token = $uploadSession->token;
+
+    // Criar short URL
+    $shortUrl = new ShortUrl();
+    $short_code = $shortUrl->create($token, $uploadSession->expires_at);
+    
+    // Update session with short URL
+    if ($short_code) {
+        $db = Database::getInstance();
+        $db->query("UPDATE upload_sessions SET short_url_id = (SELECT id FROM short_urls WHERE short_code = ?)", [$short_code]);
+    }
+
+    // Preparar URLs
+    $download_url = $settings->getSiteUrl() . '/download/' . urlencode($token);
+    $short_url_full = $short_code ? $settings->getSiteUrl() . '/s/' . $short_code : null;
+
+    // Enviar emails se especificado
+    $email_sent = false;
+    $emailTemplate = new EmailTemplate();
+    
+    // SEMPRE enviar notificação para o administrador do sistema
+    $adminEmail = $settings->get('admin_email');
+    if ($adminEmail) {
+        $emailTemplate->sendAdminUploadNotification($session_id);
+    }
+    
+    // Enviar para usuário logado (notificação de upload completo)
+    $currentUser = new User();
+    $currentUserData = $currentUser->getById($_SESSION['user_id']);
+    if ($currentUserData && $currentUserData['email']) {
+        $emailTemplate->sendUserUploadCompleteNotification($session_id, $currentUserData['email']);
+    }
+    
+    // Enviar para destinatários especificados
+    if (!empty($recipient_email) || !empty($additional_emails)) {
+        // Prepare all recipient emails
+        $all_recipients = [];
+        if (!empty($recipient_email)) {
+            $all_recipients[] = $recipient_email;
+        }
+        $all_recipients = array_merge($all_recipients, $additional_emails);
+        
+        // Remove duplicates
+        $all_recipients = array_unique($all_recipients);
+        
+        if (!empty($all_recipients)) {
+            $email_sent = $emailTemplate->sendUploadNotification(
+                $session_id,
+                $all_recipients,
+                $custom_message,
+                $notify_sender
+            );
+        }
+    }
+
+    // Limpar buffer e enviar resposta de sucesso
     ob_end_clean();
     
-    // Retornar resposta de sucesso
-    echo json_encode([
+    $response = [
         'success' => true,
-        'message' => 'Upload concluído com sucesso',
+        'message' => 'Upload realizado com sucesso!',
         'data' => [
-            'session_token' => $session_token,
-            'files_count' => count($uploaded_files),
+            'session_id' => $session_id,
+            'token' => $token,
+            'title' => $title,
+            'files' => $uploaded_files,
+            'file_count' => count($uploaded_files),
             'total_size' => $total_size,
-            'uploaded_files' => $uploaded_files,
-            'errors' => $errors
+            'total_size_formatted' => formatBytes($total_size),
+            'expires_at' => $uploadSession->expires_at,
+            'expires_at_formatted' => date('d/m/Y H:i', strtotime($uploadSession->expires_at)),
+            'download_url' => $download_url,
+            'short_url' => $short_url_full,
+            'email_sent' => $email_sent,
+            'email_count' => count($all_recipients ?? [])
         ]
-    ]);
+    ];
+    
+    echo json_encode($response);
 
 } catch (Exception $e) {
-    // Limpar qualquer output anterior
+    // Limpar buffer e enviar resposta de erro
     ob_end_clean();
     
-    error_log("Upload error: " . $e->getMessage());
-    echo json_encode([
+    // Log do erro
+    error_log("Erro no upload: " . $e->getMessage());
+    
+    $response = [
         'success' => false,
         'message' => $e->getMessage()
-    ]);
+    ];
+    
+    http_response_code(400);
+    echo json_encode($response);
 }
-?> 
+
+function formatBytes($bytes, $precision = 2) {
+    $units = array('B', 'KB', 'MB', 'GB', 'TB');
+    
+    for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
+        $bytes /= 1024;
+    }
+    
+    return round($bytes, $precision) . ' ' . $units[$i];
+}
+?>

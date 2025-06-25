@@ -49,7 +49,7 @@ RUN curl -sSLO https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mh
     && mv mhsendmail_linux_amd64 /usr/local/bin/mhsendmail
 
 # Configurar sendmail para usar MailHog
-RUN echo "sendmail_path = /usr/local/bin/mhsendmail --smtp-addr=mailhog:1025" >> /usr/local/etc/php/conf.d/sendmail.ini
+RUN echo "sendmail_path = \"/usr/local/bin/mhsendmail --smtp-addr=mailhog:1025\"" >> /usr/local/etc/php/conf.d/sendmail.ini
 
 # Criar diretórios necessários
 RUN mkdir -p /var/www/html/uploads \
